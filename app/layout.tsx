@@ -2,6 +2,7 @@ import { Geist, Geist_Mono } from "next/font/google"
 
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
+import { Toaster } from "@/components/ui/sonner"
 
 const fontSans = Geist({
   subsets: ["latin"],
@@ -24,8 +25,11 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`${fontSans.variable} ${fontMono.variable} font-sans antialiased`}
     >
-      <body>
-        <ThemeProvider>{children}</ThemeProvider>
+      <body className="bg-background text-foreground min-h-screen">
+        <ThemeProvider>
+          {children}
+          <Toaster />
+        </ThemeProvider>
       </body>
     </html>
   )
