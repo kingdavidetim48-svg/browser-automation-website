@@ -5,8 +5,10 @@ export function middleware(request: NextRequest) {
     request.cookies.get("better-auth.session_token") ||
     request.cookies.get("__Secure-better-auth.session_token");
 
-  // Protected route pattern example: /dashboard
-  const isProtected = request.nextUrl.pathname.startsWith("/dashboard");
+  // Protected route pattern: /dashboard and /test
+  const isProtected =
+    request.nextUrl.pathname.startsWith("/dashboard") ||
+    request.nextUrl.pathname.startsWith("/test");
 
   if (isProtected && !sessionCookie) {
     const url = new URL("/", request.url);
@@ -18,5 +20,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*"],
+  matcher: ["/dashboard/:path*", "/test"],
 };

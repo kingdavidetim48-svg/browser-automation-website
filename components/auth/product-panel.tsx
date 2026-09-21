@@ -1,4 +1,4 @@
-"use client"
+  "use client"
 
 import * as React from "react"
 import { Globe, Database, Workflow, Terminal, CheckCircle, ShieldCheck, Wind } from "lucide-react"

@@ -433,4 +433,4 @@ export function AuthCard({ onAuthSuccess }: { onAuthSuccess?: () => void }) {
       </CardFooter>
     </Card>
   )
-// }The glob output is ambiguous and interleaved. Let me stop relying on relative glob paths and read the actual files directly using their absolute paths. First, let me confirm the exact structure with a precise PowerShell listing scoped to the project root only (no recursion), then read the key files
+}
