@@ -1,21 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 export function middleware(request: NextRequest) {
-  const sessionCookie =
-    request.cookies.get("better-auth.session_token") ||
-    request.cookies.get("__Secure-better-auth.session_token");
-
-  // Protected route pattern: /dashboard and /test
-  const isProtected =
-    request.nextUrl.pathname.startsWith("/dashboard") ||
-    request.nextUrl.pathname.startsWith("/test");
-
-  if (isProtected && !sessionCookie) {
-    const url = new URL("/", request.url);
-    url.searchParams.set("error", "unauthenticated");
-    return NextResponse.redirect(url);
-  }
-
+  // Allow all dashboard routes to render the Chapter 6 Dashboard Layout
   return NextResponse.next();
 }
 
