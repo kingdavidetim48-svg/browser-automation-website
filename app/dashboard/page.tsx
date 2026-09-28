@@ -1,5 +1,4 @@
 "use client"
-// https://www.youtube.com/watch?v=1hnyCQW-B4A (Chapter 6 - Dashboard Layout at 01:02:43)
 import * as React from "react"
 import { useSession } from "@/lib/auth-client"
 import { DashboardLayout } from "@/components/dashboard/dashboard-layout"
