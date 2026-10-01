@@ -1,7 +1,7 @@
 // Database schema for the browser-automation project
 // Uses Neon Postgres via Drizzle ORM
 
-import { pgTable, pgEnum, varchar, text, timestamp, integer, boolean, json } from "drizzle-orm/pg-core";
+import { pgTable, pgEnum, varchar, text, timestamp, json } from "drizzle-orm/pg-core";
 
 // Enum for workflow status
 export const workflowStatus = pgEnum("status", ["draft", "active", "archived"]);
@@ -20,8 +20,11 @@ export const workflows = pgTable("workflows", {
   status: workflowStatus("status").default("draft").notNull(),
   triggerType: triggerType("trigger_type"),
   triggerConfig: json("trigger_config"),
-  nodes: json("nodes").$default([]),
-  edges: json("edges").$default([]),
+  nodes: json("nodes").$default(() => []),
+  edges: json("edges").$default(() => []),
+  // Clerk identity columns
+  userId: varchar("user_id", { length: 256 }),
+  organizationId: varchar("organization_id", { length: 256 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -80,9 +83,10 @@ export const verifications = pgTable("verifications", {
 });
 
 // Audit log table - for tracking changes
+// userId references Clerk user ID (e.g., user_xxxxxx) — no FK enforced since Clerk manages users externally
 export const auditLog = pgTable("audit_log", {
   id: varchar("id", { length: 256 }).primaryKey(),
-  userId: varchar("user_id", { length: 256 }).references(() => users.id),
+  userId: varchar("user_id", { length: 256 }),  // Clerk userId
   action: varchar("action", { length: 256 }).notNull(),
   entityType: varchar("entity_type", { length: 256 }).notNull(),
   entityId: varchar("entity_id", { length: 256 }),

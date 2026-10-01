@@ -1,3 +1,4 @@
+import { ClerkProvider } from "@clerk/nextjs"
 import { Geist, Geist_Mono } from "next/font/google"
 
 import "./globals.css"
@@ -25,11 +26,13 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`${fontSans.variable} ${fontMono.variable} font-sans antialiased`}
     >
-      <body className="bg-background text-foreground min-h-screen">
-        <ThemeProvider>
-          {children}
-          <Toaster />
-        </ThemeProvider>
+      <body className="min-h-screen bg-background text-foreground">
+        <ClerkProvider>
+          <ThemeProvider>
+            {children}
+            <Toaster />
+          </ThemeProvider>
+        </ClerkProvider>
       </body>
     </html>
   )

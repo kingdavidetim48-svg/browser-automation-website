@@ -1,15 +1,17 @@
 "use client";
 
 import * as React from "react";
-import { useSession } from "@/lib/auth-client";
+import { useRouter } from "next/navigation";
+import { useUser } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2, Shield } from "lucide-react";
 
 export default function TestPage() {
-  const { data: session, isPending } = useSession();
+  const { user, isLoaded } = useUser();
+  const router = useRouter();
 
-  if (isPending) {
+  if (!isLoaded) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Loader2 className="size-8 animate-spin text-muted-foreground" />
@@ -26,7 +28,7 @@ export default function TestPage() {
           </div>
           <CardTitle className="text-2xl">Protected Test Page</CardTitle>
           <p className="text-muted-foreground">
-            This page is protected by the middleware. You should only see this if authenticated.
+            This page is protected by Clerk middleware. You can only see this if authenticated.
           </p>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -38,23 +40,28 @@ export default function TestPage() {
                 Authenticated
               </span>
             </div>
-            {session?.user && (
+            {user && (
               <div className="space-y-1 text-sm">
                 <p>
-                  <span className="font-medium">Name:</span> {session.user.name}
+                  <span className="font-medium">Name:</span> {user.fullName}
                 </p>
                 <p>
-                  <span className="font-medium">Email:</span> {session.user.email}
+                  <span className="font-medium">Email:</span>{" "}
+                  {user.primaryEmailAddress?.emailAddress}
                 </p>
                 <p>
-                  <span className="font-medium">Email Verified:</span>{" "}
-                  {session.user.emailVerified ? "Yes" : "No"}
+                  <span className="font-medium">Clerk ID:</span>{" "}
+                  <span className="font-mono text-xs">{user.id}</span>
                 </p>
               </div>
             )}
           </div>
-          <Button variant="outline" className="w-full" onClick={() => window.location.href = "/"}>
-            Back to Home
+          <Button
+            variant="outline"
+            className="w-full"
+            onClick={() => router.push("/dashboard")}
+          >
+            Go to Dashboard
           </Button>
         </CardContent>
       </Card>

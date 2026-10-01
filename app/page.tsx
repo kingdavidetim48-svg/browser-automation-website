@@ -1,7 +1,10 @@
-"use client"
+import { auth } from "@clerk/nextjs/server"
+import { redirect } from "next/navigation"
 
-import Dashboard from "./dashboard/page"
-
-export default function Page() {
-  return <Dashboard />
+export default async function Home() {
+  const { userId } = await auth()
+  if (userId) {
+    redirect("/dashboard")
+  }
+  redirect("/sign-in")
 }

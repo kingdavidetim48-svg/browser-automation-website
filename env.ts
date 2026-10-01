@@ -1,15 +1,12 @@
-// Environment variable loader for server-side code
-// Loads .env.local and .env files
-
-import "dotenv/config";
-
-// This file is imported by drizzle.config.ts to load environment variables
-// before the config is evaluated.
+// Environment variable declarations for server-side code
 
 export const env = {
   DATABASE_URL: process.env.DATABASE_URL,
   DATABASE_URL_UNPOOLED: process.env.DATABASE_URL_UNPOOLED,
-  BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET,
-  BETTER_AUTH_URL: process.env.BETTER_AUTH_URL,
   NEON_BRANCH: process.env.NEON_BRANCH,
+  // Clerk (server-side only - never expose to client)
+  CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY,
+  // Browserbase
+  BROWSERBASE_API_KEY: process.env.BROWSERBASE_API_KEY,
+  BROWSERBASE_PROJECT_ID: process.env.BROWSERBASE_PROJECT_ID,
 };

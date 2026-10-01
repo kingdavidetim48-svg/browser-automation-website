@@ -5,7 +5,7 @@ import { SidebarProvider } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { DashboardSidebar } from "@/components/dashboard/sidebar"
 import { DashboardHeader } from "@/components/dashboard/header"
-import { WorkflowProvider } from "@/components/dashboard/workflow-context"
+import { WorkflowProvider } from "@/features/workflows/hooks/use-workflows"
 
 interface DashboardLayoutProps {
   children: React.ReactNode

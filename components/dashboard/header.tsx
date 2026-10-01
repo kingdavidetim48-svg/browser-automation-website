@@ -3,12 +3,32 @@
 import * as React from "react"
 import { useSidebar } from "@/components/ui/sidebar"
 import { Button } from "@/components/ui/button"
-import { PanelLeft, MoreHorizontal, Play } from "lucide-react"
-import { useWorkflows } from "./workflow-context"
+import { PanelLeft, MoreHorizontal, Play, Loader2 } from "lucide-react"
+import { useWorkflows } from "@/features/workflows/hooks/use-workflows"
+import { runWorkflowAction } from "@/features/workflows/actions"
+import { toast } from "sonner"
 
 export function DashboardHeader() {
   const { toggleSidebar } = useSidebar()
   const { selectedWorkflow } = useWorkflows()
+  const [isRunning, setIsRunning] = React.useState(false)
+
+  const handleRun = async () => {
+    if (!selectedWorkflow || isRunning) return
+    setIsRunning(true)
+    try {
+      const result = await runWorkflowAction(selectedWorkflow.id)
+      if (result.status === "success") {
+        toast.success(`Workflow "${selectedWorkflow.name}" completed`)
+      } else {
+        toast.error(`Workflow failed: ${result.error || "Unknown error"}`)
+      }
+    } catch {
+      toast.error("Failed to run workflow")
+    } finally {
+      setIsRunning(false)
+    }
+  }
 
   return (
     <>
@@ -65,9 +85,17 @@ export function DashboardHeader() {
             </button>
 
             {/* Run Button (design/canvas.png) */}
-            <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700/80 text-white text-xs font-medium border border-neutral-700/60 shadow-xs transition-colors cursor-pointer">
-              <Play className="size-3 fill-current" />
-              <span>Run</span>
+            <button
+              onClick={handleRun}
+              disabled={isRunning}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700/80 text-white text-xs font-medium border border-neutral-700/60 shadow-xs transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {isRunning ? (
+                <Loader2 className="size-3 animate-spin" />
+              ) : (
+                <Play className="size-3 fill-current" />
+              )}
+              <span>{isRunning ? "Running…" : "Run"}</span>
             </button>
           </div>
         </div>

@@ -1,10 +1,11 @@
-import { createAuthClient } from "better-auth/react";
+// auth-client.ts — DEPRECATED
+// All client-side auth is now handled by @clerk/nextjs hooks:
+//   useUser()         → user identity
+//   useAuth()         → auth state / tokens
+//   useOrganization() → active org
+//   useClerk()        → signOut, openUserProfile, etc.
+//
+// This file is kept temporarily to ease the transition.
+// Remove once all references have been updated.
 
-export const authClient = createAuthClient({
-  baseURL:
-    typeof window !== "undefined"
-      ? window.location.origin
-      : process.env.NEXT_PUBLIC_BETTER_AUTH_URL || "http://localhost:3000",
-});
-
-export const { signIn, signUp, signOut, useSession } = authClient;
+export {}
