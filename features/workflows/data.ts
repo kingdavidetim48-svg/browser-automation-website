@@ -1,75 +1,57 @@
-import { db } from "@/lib/db"
-import { workflows } from "@/lib/schema"
-import { eq, and, isNull } from "drizzle-orm"
-import { auth } from "@clerk/nextjs/server"
+import { and, desc, eq } from "drizzle-orm"
 
-export interface WorkflowRecord {
+import { db } from "@/lib/db"
+import { WorkflowGraph, workflows } from "@/lib/db/schema"
+import { validateGraph } from "@/features/workflows/lib/validate-graph"
+
+export async function saveWorkflowGraph({
+  orgId,
+  id,
+  graph,
+}: {
+  orgId: string
   id: string
-  name: string
-  description: string | null
-  status: "draft" | "active" | "archived"
-  triggerType: "webhook" | "schedule" | "manual" | null
-  triggerConfig: unknown
-  nodes: unknown[]
-  edges: unknown[]
-  organizationId: string | null
-  userId: string | null
-  createdAt: Date
-  updatedAt: Date
+  graph: WorkflowGraph
+}) {
+  const problems = validateGraph(graph)
+  if (problems.length > 0) throw new Error(problems.join(" "))
+  await db
+    .update(workflows)
+    .set({ graph, updatedAt: new Date() })
+    .where(and(eq(workflows.id, id), eq(workflows.orgId, orgId)))
 }
 
-/**
- * Retrieves workflows authorized for the current Clerk user/organization.
- * - When orgId is present: returns workflows owned by the organization.
- * - When orgId is null: returns personal workflows (userId matches and organizationId is null).
- */
-export async function getWorkflows(): Promise<WorkflowRecord[]> {
-  const { userId, orgId } = await auth()
-  if (!userId) return []
-
-  if (orgId) {
-    const result = await db
-      .select()
-      .from(workflows)
-      .where(eq(workflows.organizationId, orgId))
-    return result as WorkflowRecord[]
-  }
-
-  const result = await db
+export function listWorkflows(orgId: string) {
+  return db
     .select()
     .from(workflows)
-    .where(and(eq(workflows.userId, userId), isNull(workflows.organizationId)))
-
-  return result as WorkflowRecord[]
+    .where(eq(workflows.orgId, orgId))
+    .orderBy(desc(workflows.createdAt))
 }
 
-/**
- * Retrieves a single workflow by ID and validates ownership/organization authorization.
- * Returns null if the workflow does not exist or the requester is unauthorized.
- */
-export async function getWorkflowById(workflowId: string): Promise<WorkflowRecord | null> {
-  const { userId, orgId } = await auth()
-  if (!userId) return null
-
+export async function getWorkflow(orgId: string, id: string) {
   const [workflow] = await db
     .select()
     .from(workflows)
-    .where(eq(workflows.id, workflowId))
+    .where(and(eq(workflows.id, id), eq(workflows.orgId, orgId)))
 
-  if (!workflow) return null
+  return workflow
+}
 
-  const typedWorkflow = workflow as WorkflowRecord
+export async function createWorkflow(orgId: string, name: string) {
+  const [workflow] = await db
+    .insert(workflows)
+    .values({ orgId, name })
+    .returning()
 
-  // Server-side multi-tenant authorization
-  if (orgId) {
-    if (typedWorkflow.organizationId !== orgId) {
-      return null
-    }
-  } else {
-    if (typedWorkflow.userId !== userId || typedWorkflow.organizationId !== null) {
-      return null
-    }
-  }
+  return workflow
+}
 
-  return typedWorkflow
+export async function deleteWorkflow(orgId: string, id: string) {
+  const [workflow] = await db
+    .delete(workflows)
+    .where(and(eq(workflows.id, id), eq(workflows.orgId, orgId)))
+    .returning()
+
+  return workflow
 }
