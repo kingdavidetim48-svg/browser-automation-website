@@ -9,7 +9,8 @@ import { redirect } from "next/navigation"
 import type { runWorkflowTask } from "@/features/workflows/tasks/run-workflow";
 
 import { liveblocks } from "@/lib/liveblocks"
-import { createWorkflow, deleteWorkflow, saveWorkflowGraph } from "@/features/workflows/data"
+import { createWorkflow, deleteWorkflow, getWorkflow, saveWorkflowGraph } from "@/features/workflows/data"
+import { validateGraph } from "@/features/workflows/lib/validate-graph"
 import { WorkflowGraph } from "@/lib/db/schema"
 
 export async function createWorkflowAction(name: string) {
@@ -58,13 +59,11 @@ export async function deleteWorkflowAction(id: string) {
   redirect("/")
 }
 
-export async function runWorkflowAction({
-  id,
-  graph,
-}: {
-  id: string
-  graph: WorkflowGraph
-}) {
+export async function runWorkflowAction(
+  input: string | { id: string; graph?: WorkflowGraph },
+) {
+  const id = typeof input === "string" ? input : input.id
+  const graph = typeof input === "string" ? undefined : input.graph
   const { orgId, has } = await auth()
 
   if (!orgId) {
@@ -80,7 +79,16 @@ export async function runWorkflowAction({
     workflowId: id,
   })
 
-  const hasAgentNode = graph.nodes.some((node) => node.data.type === "agent")
+  const workflow = await getWorkflow(orgId, id)
+  if (!workflow) throw new Error("Workflow not found")
+
+  const graphToRun = graph ?? workflow.graph
+  if (!graphToRun) throw new Error("Workflow has no saved graph")
+
+  const graphProblems = validateGraph(graphToRun)
+  if (graphProblems.length > 0) throw new Error(graphProblems.join(" "))
+
+  const hasAgentNode = graphToRun.nodes.some((node) => node.data.type === "agent")
   if (hasAgentNode && !has({ plan: "pro" })) {
     Sentry.logger.warn("Workflow run denied — Agent node requires Pro plan", {
       workflowId: id,
@@ -90,7 +98,7 @@ export async function runWorkflowAction({
   }
 
   try {
-    await saveWorkflowGraph({ orgId, id, graph })
+    if (graph) await saveWorkflowGraph({ orgId, id, graph })
   } catch (error) {
     Sentry.logger.warn("Workflow run blocked — graph validation failed", {
       workflowId: id,
@@ -109,7 +117,7 @@ export async function runWorkflowAction({
     workflowId: id,
     orgId,
     runId: handle.id,
-    nodeCount: graph.nodes.length,
+    nodeCount: graphToRun.nodes.length,
     hasAgentNode,
   })
 

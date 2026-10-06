@@ -32,6 +32,7 @@ export type NodeDefinition = {
   type: string
   kind: StepNodeKind
   label: string
+  description: string
   icon: LucideIcon
   accent: string // Tailwind classes for the icon chip color
   fields: NodeField[]
@@ -43,6 +44,7 @@ export const nodeRegistry = {
     type: "start",
     kind: "trigger",
     label: "Start",
+    description: "Initial trigger starting the workflow execution",
     icon: MousePointerClick,
     accent: "bg-blue-500 text-white",
     fields: [],
@@ -52,6 +54,7 @@ export const nodeRegistry = {
     type: "open-url",
     kind: "action",
     label: "Open URL",
+    description: "Navigate the browser session to a target URL",
     icon: Globe,
     accent: "bg-emerald-500 text-white",
     fields: [
@@ -66,6 +69,7 @@ export const nodeRegistry = {
     type: "act",
     kind: "action",
     label: "Act",
+    description: "Perform a browser action using a natural language instruction",
     icon: Pointer,
     accent: "bg-violet-500 text-white",
     fields: [
@@ -87,6 +91,7 @@ export const nodeRegistry = {
     type: "extract",
     kind: "action",
     label: "Extract",
+    description: "Extract structured data from the current page",
     icon: ScanText,
     accent: "bg-amber-500 text-white",
     fields: [
@@ -104,6 +109,7 @@ export const nodeRegistry = {
     type: "observe",
     kind: "action",
     label: "Observe",
+    description: "Inspect elements and evaluate page state",
     icon: Eye,
     accent: "bg-sky-500 text-white",
     fields: [
@@ -125,6 +131,7 @@ export const nodeRegistry = {
     type: "agent",
     kind: "action",
     label: "Agent",
+    description: "Autonomous browser sub-agent execution with Stagehand",
     icon: Bot,
     accent: "bg-rose-500 text-white",
     fields: [
@@ -146,6 +153,7 @@ export const nodeRegistry = {
     type: "send-email",
     kind: "action",
     label: "Send Email",
+    description: "Dispatch a notification email with execution results",
     icon: Mail,
     accent: "bg-teal-500 text-white",
     fields: [

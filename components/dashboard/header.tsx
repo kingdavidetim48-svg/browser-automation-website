@@ -17,12 +17,8 @@ export function DashboardHeader() {
     if (!selectedWorkflow || isRunning) return
     setIsRunning(true)
     try {
-      const result = await runWorkflowAction(selectedWorkflow.id)
-      if (result.status === "success") {
-        toast.success(`Workflow "${selectedWorkflow.name}" completed`)
-      } else {
-        toast.error(`Workflow failed: ${result.error || "Unknown error"}`)
-      }
+      const run = await runWorkflowAction(selectedWorkflow.id)
+      toast.success(`Workflow "${selectedWorkflow.name}" started (${run.id})`)
     } catch {
       toast.error("Failed to run workflow")
     } finally {

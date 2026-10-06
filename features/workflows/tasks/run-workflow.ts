@@ -1,7 +1,7 @@
 import toposort from "toposort"
 import { logger, metadata, task } from "@trigger.dev/sdk"
 import type { DeserializedJson } from "@trigger.dev/core"
-import { Stagehand } from "@browserbasehq/stagehand"
+import { Stagehand, browserbase, type StagehandBrowser } from "@browserbasehq/stagehand"
 import { nodeExecutors } from "@/features/workflows/nodes/node-executors"
 import {
   interpolate,
@@ -80,23 +80,22 @@ export const runWorkflowTask = task({
     // LLM routes through Browserbase's Model Gateway (BROWSERBASE_API_KEY), so no
     // separate provider key is needed.
     let stagehand: Stagehand | undefined
+    let browser: StagehandBrowser | undefined
     // The Browserbase session id, captured the moment the session opens so it can
     // be returned in the run's output — a panel reads it there to fetch the replay
     // once the run finishes and the recording is available.
     let browserbaseSessionId: string | undefined
     const getStagehand = async () => {
       if (stagehand) return stagehand
-      stagehand = new Stagehand({
-        env: "BROWSERBASE",
-        apiKey: process.env.BROWSERBASE_API_KEY!,
-        model: "google/gemini-2.5-flash",
-        // Pino's logging backend spawns a thread-stream worker (lib/worker.js)
-        // that can't be resolved inside trigger.dev's bundled output. Disable it —
-        // the option exists for exactly these minimal/bundled environments.
-        disablePino: true,
+      const apiKey = process.env.BROWSERBASE_API_KEY
+      if (!apiKey) throw new Error("BROWSERBASE_API_KEY is not configured")
+
+      browser = await browserbase.launch({ apiKey })
+      browserbaseSessionId = browser.sessionId
+      stagehand = await Stagehand.create({
+        browser,
+        model: { modelName: "google/gemini-2.5-flash" },
       })
-      await stagehand.init()
-      browserbaseSessionId = stagehand.browserbaseSessionID
       return stagehand
     }
 
@@ -152,7 +151,12 @@ export const runWorkflowTask = task({
         step.error = error instanceof Error ? error.message : String(error)
         publishSteps()
         await metadata.flush()
-        await stagehand?.close()
+        try {
+          if (stagehand) await stagehand.close()
+          else await browser?.close()
+        } catch {
+          // Preserve the node error as the run's failure; cleanup is best effort.
+        }
         throw error
       }
 
