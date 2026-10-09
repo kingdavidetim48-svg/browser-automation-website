@@ -1,7 +1,7 @@
 import toposort from "toposort"
 import { logger, metadata, task } from "@trigger.dev/sdk"
 import type { DeserializedJson } from "@trigger.dev/core"
-import { Stagehand, browserbase, type StagehandBrowser } from "@browserbasehq/stagehand"
+import { Stagehand } from "@browserbasehq/stagehand"
 import { nodeExecutors } from "@/features/workflows/nodes/node-executors"
 import {
   interpolate,
@@ -9,6 +9,8 @@ import {
 } from "@/features/workflows/lib/interpolate"
 import { getWorkflow } from "@/features/workflows/data"
 import type { NodeType } from "@/features/workflows/nodes/node-registry"
+import { validateGraph } from "@/features/workflows/lib/validate-graph"
+import type { WorkflowGraph } from "@/lib/db/schema"
 
 // One entry per node the run will walk, published to the run's metadata under
 // "steps" so the canvas — and the run console below it — can watch each node
@@ -28,17 +30,28 @@ export type RunStep = {
   error?: string
 }
 
-// The Trigger.dev task the Run button fires. It loads the saved graph, works out
-// what order the nodes should run in, and walks them. For now each node just
-// announces itself — real execution (per-node executors, live progress, browser
-// sessions) gets layered on from here.
+// The Trigger.dev task loads and validates the saved graph, computes a
+// topological execution order, and runs each action through its registered
+// executor while publishing progress and collected outputs.
 export const runWorkflowTask = task({
   id: "run-workflow",
-  run: async ({ workflowId, orgId }: { workflowId: string; orgId: string }) => {
+  run: async ({
+    workflowId,
+    orgId,
+  }: {
+    workflowId: string
+    orgId: string
+  }) => {
     const workflow = await getWorkflow(orgId, workflowId)
-    if (!workflow?.graph) throw new Error(`Workflow ${workflowId} has no graph`)
+    if (!workflow) throw new Error(`Workflow ${workflowId} was not found`)
 
-    const { nodes, edges } = workflow.graph
+    // The queued task reads the canonical graph after the authenticated action
+    // has persisted the latest edits for this workflow ID.
+    const graph: WorkflowGraph | null = workflow.graph
+    if (!graph) throw new Error(`Workflow ${workflowId} has no saved graph`)
+    const { nodes, edges } = graph
+    const graphProblems = validateGraph(graph)
+    if (graphProblems.length) throw new Error(graphProblems.join(" "))
     const byId = new Map(nodes.map((n) => [n.id, n]))
 
     // Run only connected nodes — anything touching an edge. Orphans dropped on
@@ -77,10 +90,10 @@ export const runWorkflowTask = task({
 
     // The run owns one Browserbase session, opened lazily on the first browser step
     // and reused by every later one, so the recording spans the whole flow. The
-    // LLM routes through Browserbase's Model Gateway (BROWSERBASE_API_KEY), so no
-    // separate provider key is needed.
+    // Stagehand-hosted auto mode keeps browser primitive calls on the configured
+    // Browserbase account. The autonomous Agent uses its explicitly selected
+    // model and requires that provider's API credential.
     let stagehand: Stagehand | undefined
-    let browser: StagehandBrowser | undefined
     // The Browserbase session id, captured the moment the session opens so it can
     // be returned in the run's output — a panel reads it there to fetch the replay
     // once the run finishes and the recording is available.
@@ -90,12 +103,15 @@ export const runWorkflowTask = task({
       const apiKey = process.env.BROWSERBASE_API_KEY
       if (!apiKey) throw new Error("BROWSERBASE_API_KEY is not configured")
 
-      browser = await browserbase.launch({ apiKey })
-      browserbaseSessionId = browser.sessionId
-      stagehand = await Stagehand.create({
-        browser,
-        model: { modelName: "google/gemini-2.5-flash" },
+      stagehand = new Stagehand({
+        env: "BROWSERBASE",
+        apiKey,
+        projectId: process.env.BROWSERBASE_PROJECT_ID,
+        model: { modelName: "auto" },
+        disablePino: true,
       })
+      await stagehand.init()
+      browserbaseSessionId = stagehand.browserbaseSessionID
       return stagehand
     }
 
@@ -104,68 +120,68 @@ export const runWorkflowTask = task({
     // populated by the time we run it.
     const outputs: NodeOutputs = {}
 
-    for (let i = 0; i < order.length; i++) {
-      const id = order[i]
-      const step = steps[i]
-      const node = byId.get(id)!
-      logger.log(`Running step: ${node.data.title}`)
+    try {
+      for (let i = 0; i < order.length; i++) {
+        const id = order[i]
+        const step = steps[i]
+        const node = byId.get(id)!
+        logger.log(`Running step: ${node.data.title}`)
 
-      // A node with no executor (the start trigger) does no work and produces no
-      // output — mark it done rather than leaving it "pending", which reads as
-      // skipped forever in the console.
-      const executor = nodeExecutors[node.data.type]
-      if (!executor) {
-        step.status = "done"
-        publishSteps()
-        continue
-      }
+        // A node with no executor (the start trigger) does no work and produces no
+        // output — mark it done rather than leaving it "pending", which reads as
+        // skipped forever in the console.
+        const executor = nodeExecutors[node.data.type]
+        if (!executor) {
+          step.status = "done"
+          publishSteps()
+          continue
+        }
 
-      // Mark running before the executor and flush immediately: the "done" set
-      // below happens before the SDK's next background flush, so without forcing
-      // it here the "running" state is overwritten and the canvas never spins.
-      step.status = "running"
-      publishSteps()
-      await metadata.flush()
-
-      // Swap {{ nodeId.path }} placeholders for upstream output before running.
-      const values = Object.fromEntries(
-        Object.entries(node.data.values).map(([key, text]) => [
-          key,
-          interpolate({ text, outputs }),
-        ])
-      )
-
-      // Time the executor so the console can show how long the step took, on
-      // both the success and failure paths.
-      const startedAt = Date.now()
-      try {
-        const output = await executor({ values, getStagehand })
-        outputs[id] = output
-        step.output = output
-      } catch (error) {
-        // Flush the "failed" state before the throw unwinds the run: a thrown run
-        // returns no output, so this flushed metadata is the only way the canvas
-        // ever learns which node failed — and the only place its error survives.
-        step.status = "failed"
-        step.durationMs = Date.now() - startedAt
-        step.error = error instanceof Error ? error.message : String(error)
+        // Mark running before the executor and flush immediately: the "done" set
+        // below happens before the SDK's next background flush, so without forcing
+        // it here the "running" state is overwritten and the canvas never spins.
+        step.status = "running"
         publishSteps()
         await metadata.flush()
+
+        // Swap {{ nodeId.path }} placeholders for upstream output before running.
+        const values = Object.fromEntries(
+          Object.entries(node.data.values).map(([key, text]) => [
+            key,
+            interpolate({ text, outputs }),
+          ])
+        )
+
+        // Time the executor so the console can show how long the step took, on
+        // both the success and failure paths.
+        const startedAt = Date.now()
         try {
-          if (stagehand) await stagehand.close()
-          else await browser?.close()
-        } catch {
-          // Preserve the node error as the run's failure; cleanup is best effort.
+          const output = await executor({ values, getStagehand })
+          outputs[id] = output
+          step.output = output
+        } catch (error) {
+          // Flush the "failed" state before the throw unwinds the run: a thrown run
+          // returns no output, so this flushed metadata is the only way the canvas
+          // ever learns which node failed — and the only place its error survives.
+          step.status = "failed"
+          step.durationMs = Date.now() - startedAt
+          step.error = error instanceof Error ? error.message : String(error)
+          publishSteps()
+          await metadata.flush()
+          throw error
         }
-        throw error
+
+        step.status = "done"
+        step.durationMs = Date.now() - startedAt
+        publishSteps()
       }
-
-      step.status = "done"
-      step.durationMs = Date.now() - startedAt
-      publishSteps()
+    } finally {
+      try {
+        await stagehand?.close()
+      } catch (error) {
+        logger.error("Failed to close the Stagehand session", { error })
+      }
     }
-
-    await stagehand?.close()
 
     return { steps, browserbaseSessionId }
   },

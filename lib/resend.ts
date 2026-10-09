@@ -1,3 +1,5 @@
+import "server-only"
+
 type SendEmailResponse = {
   data: { id: string } | null
   error: { message: string } | null
@@ -9,16 +11,19 @@ export const resend = {
       from,
       to,
       subject,
-      html,
+      text,
     }: {
       from: string
       to: string
       subject: string
-      html: string
+      text: string
     }): Promise<SendEmailResponse> {
       const apiKey = process.env.RESEND_API_KEY
       if (!apiKey) {
-        return { data: null, error: { message: "RESEND_API_KEY is not configured" } }
+        return {
+          data: null,
+          error: { message: "RESEND_API_KEY is not configured" },
+        }
       }
 
       const response = await fetch("https://api.resend.com/emails", {
@@ -27,11 +32,10 @@ export const resend = {
           Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ from, to, subject, html }),
+        body: JSON.stringify({ from, to, subject, text }),
       })
       const result = (await response.json()) as
-        | { id: string }
-        | { message?: string; error?: string }
+        { id: string } | { message?: string; error?: string }
 
       if (!response.ok || !("id" in result)) {
         return {

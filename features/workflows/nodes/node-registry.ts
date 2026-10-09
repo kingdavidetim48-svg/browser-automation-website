@@ -58,7 +58,12 @@ export const nodeRegistry = {
     icon: Globe,
     accent: "bg-emerald-500 text-white",
     fields: [
-      { key: "url", label: "URL", placeholder: "https://youtube.com", required: true },
+      {
+        key: "url",
+        label: "URL",
+        placeholder: "https://youtube.com",
+        required: true,
+      },
     ],
     outputs: [
       { path: "url", label: "URL" },
@@ -69,7 +74,8 @@ export const nodeRegistry = {
     type: "act",
     kind: "action",
     label: "Act",
-    description: "Perform a browser action using a natural language instruction",
+    description:
+      "Perform a browser action using a natural language instruction",
     icon: Pointer,
     accent: "bg-violet-500 text-white",
     fields: [
@@ -131,7 +137,8 @@ export const nodeRegistry = {
     type: "agent",
     kind: "action",
     label: "Agent",
-    description: "Autonomous browser sub-agent execution with Stagehand",
+    description:
+      "Autonomous multi-step browser execution with Stagehand; the server requires a Gemini API key.",
     icon: Bot,
     accent: "bg-rose-500 text-white",
     fields: [
@@ -157,8 +164,18 @@ export const nodeRegistry = {
     icon: Mail,
     accent: "bg-teal-500 text-white",
     fields: [
-      { key: "to", label: "To", placeholder: "person@example.com", required: true },
-      { key: "subject", label: "Subject", placeholder: "Hello", required: true },
+      {
+        key: "to",
+        label: "To",
+        placeholder: "person@example.com",
+        required: true,
+      },
+      {
+        key: "subject",
+        label: "Subject",
+        placeholder: "Hello",
+        required: true,
+      },
       {
         key: "body",
         label: "Body",
@@ -173,8 +190,8 @@ export const nodeRegistry = {
 
 export type NodeType = keyof typeof nodeRegistry
 
-// Plain JSON only (synced through Liveblocks later). type keys into the registry;
-// kind and title are denormalized so the server can read them without the registry.
+// Plain JSON only: graph data is stored in Postgres and interpreted against this
+// registry on both client and server. kind and title remain denormalized in data.
 export type StepNodeData = {
   type: NodeType
   kind: StepNodeKind

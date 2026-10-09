@@ -1,7 +1,9 @@
 import { and, desc, eq } from "drizzle-orm"
+import { randomUUID } from "node:crypto"
 
 import { db } from "@/lib/db"
-import { WorkflowGraph, workflows } from "@/lib/db/schema"
+import { workflows } from "@/lib/db/schema"
+import type { WorkflowGraph } from "@/lib/db/schema"
 import { validateGraph } from "@/features/workflows/lib/validate-graph"
 
 export async function saveWorkflowGraph({
@@ -13,17 +15,25 @@ export async function saveWorkflowGraph({
   id: string
   graph: WorkflowGraph
 }) {
-  const problems = validateGraph(graph)
+  const problems = validateGraph(graph, { runnable: false })
   if (problems.length > 0) throw new Error(problems.join(" "))
-  await db
+  const [updated] = await db
     .update(workflows)
     .set({ graph, updatedAt: new Date() })
     .where(and(eq(workflows.id, id), eq(workflows.orgId, orgId)))
+    .returning({ id: workflows.id })
+
+  if (!updated) throw new Error("Workflow not found")
 }
 
 export function listWorkflows(orgId: string) {
   return db
-    .select()
+    .select({
+      id: workflows.id,
+      name: workflows.name,
+      orgId: workflows.orgId,
+      createdAt: workflows.createdAt,
+    })
     .from(workflows)
     .where(eq(workflows.orgId, orgId))
     .orderBy(desc(workflows.createdAt))
@@ -38,10 +48,14 @@ export async function getWorkflow(orgId: string, id: string) {
   return workflow
 }
 
-export async function createWorkflow(orgId: string, name: string) {
+export async function createWorkflow(
+  orgId: string,
+  name: string,
+  graph: WorkflowGraph
+) {
   const [workflow] = await db
     .insert(workflows)
-    .values({ orgId, name })
+    .values({ id: randomUUID(), orgId, name, graph })
     .returning()
 
   return workflow
@@ -53,5 +67,20 @@ export async function deleteWorkflow(orgId: string, id: string) {
     .where(and(eq(workflows.id, id), eq(workflows.orgId, orgId)))
     .returning()
 
+  return workflow
+}
+
+export async function renameWorkflow(
+  orgId: string,
+  id: string,
+  name: string
+) {
+  const [workflow] = await db
+    .update(workflows)
+    .set({ name, updatedAt: new Date() })
+    .where(and(eq(workflows.id, id), eq(workflows.orgId, orgId)))
+    .returning({ id: workflows.id, name: workflows.name })
+
+  if (!workflow) throw new Error("Workflow not found")
   return workflow
 }

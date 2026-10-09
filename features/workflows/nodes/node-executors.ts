@@ -1,4 +1,4 @@
- import type { Stagehand } from "@browserbasehq/stagehand"
+import type { Stagehand } from "@browserbasehq/stagehand"
 
 import type {
   ActionNodeType,
@@ -24,9 +24,15 @@ export const nodeExecutors: Partial<Record<NodeType, NodeExecutor>> = {
   act: async ({ values, getStagehand }) =>
     act({ stagehand: await getStagehand(), instruction: values.instruction }),
   extract: async ({ values, getStagehand }) =>
-    extract({ stagehand: await getStagehand(), instruction: values.instruction }),
+    extract({
+      stagehand: await getStagehand(),
+      instruction: values.instruction,
+    }),
   observe: async ({ values, getStagehand }) =>
-    observe({ stagehand: await getStagehand(), instruction: values.instruction }),
+    observe({
+      stagehand: await getStagehand(),
+      instruction: values.instruction,
+    }),
   agent: async ({ values, getStagehand }) =>
     agent({ stagehand: await getStagehand(), instruction: values.instruction }),
   "send-email": async ({ values }) =>

@@ -9,7 +9,7 @@ export async function observe({
 }) {
   const results = await stagehand.observe(instruction)
 
-  const matches = results.data.map(({ selector, description }) => ({
+  const matches = results.map(({ selector, description }) => ({
     selector,
     description,
   }))

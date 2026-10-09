@@ -1,18 +1,21 @@
-import type { Edge } from "@xyflow/react"
-import { jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core"
+import type { Edge, Viewport } from "@xyflow/react"
+import { jsonb, pgTable, timestamp, varchar } from "drizzle-orm/pg-core"
 
 import type { StepNodeType } from "@/features/workflows/nodes/node-registry"
 
-// Canonical, server-readable snapshot of the flow. Mirrors React Flow's own
-// shape 1:1 so a future executor can read it without remapping. Persisted by the
-// Run action; the live editing copy still lives in the Liveblocks room.
-export type WorkflowGraph = { nodes: StepNodeType[]; edges: Edge[] }
+// Canonical React Flow graph persisted in workflows.graph JSONB. Node and edge
+// IDs, configurations, positions, and the viewport stay scoped to this row.
+export type WorkflowGraph = {
+  nodes: StepNodeType[]
+  edges: Edge[]
+  viewport?: Viewport
+}
 
 export const workflows = pgTable("workflows", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  orgId: text("org_id").notNull(),
-  name: text("name").notNull(),
-  graph: jsonb("graph").$type<WorkflowGraph>(),
+  id: varchar("id", { length: 256 }).primaryKey(),
+  orgId: varchar("organization_id", { length: 256 }).notNull(),
+  name: varchar("name", { length: 256 }).notNull(),
+  graph: jsonb("graph").$type<WorkflowGraph>().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 })

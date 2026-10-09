@@ -9,15 +9,22 @@ export async function sendEmail({
   subject: string
   body: string
 }) {
+  const from = process.env.RESEND_FROM_EMAIL
+  if (!from) {
+    throw new Error(
+      "RESEND_FROM_EMAIL is not configured; set it to a sender address verified with Resend."
+    )
+  }
+
   const { data, error } = await resend.emails.send({
-    from: "onboarding@resend.dev",
+    from,
     to,
     subject,
-    html: body,
+    text: body,
   })
 
-  // The Resend SDK returns { data, error } and does not throw on API errors.
-  // Throw so the run marks this step failed instead of looking successful.
+  // The REST adapter returns { data, error }; throw so the run accurately marks
+  // this step failed instead of reporting a successful notification.
   if (error || !data) {
     throw new Error(error?.message ?? "Resend returned no email id")
   }

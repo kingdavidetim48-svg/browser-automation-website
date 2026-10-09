@@ -7,7 +7,7 @@ export async function extract({
   stagehand: Stagehand
   instruction: string
 }) {
-  const { data } = await stagehand.extract(instruction)
+  const { extraction } = await stagehand.extract(instruction)
 
-  return { extraction: data.extraction }
+  return { extraction }
 }

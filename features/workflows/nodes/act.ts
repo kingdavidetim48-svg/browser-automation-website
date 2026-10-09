@@ -8,15 +8,17 @@ export async function act({
   instruction: string
 }) {
   const result = await stagehand.act(instruction)
-  const page = await stagehand.browser.context.activePage()
+  const page = stagehand.context.activePage()
 
   if (!page) {
-    throw new Error("Stagehand completed the action but no browser page is open")
+    throw new Error(
+      "Stagehand completed the action but no browser page is open"
+    )
   }
 
   return {
-    success: result.data.success,
-    message: result.data.message,
-    url: await page.url(),
+    success: result.success,
+    message: result.message,
+    url: page.url(),
   }
 }
