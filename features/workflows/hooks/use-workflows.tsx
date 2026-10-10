@@ -47,6 +47,7 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
   const [workflows, setWorkflows] = React.useState<WorkflowItem[]>([])
   const [isLoading, setIsLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
+  const refreshRequest = React.useRef(0)
 
   // The route is the sole source of the open workflow. This context only keeps
   // the sidebar list and navigation helpers; graph state belongs to its editor.
@@ -54,13 +55,18 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
     () => workflowIdFromPathname(pathname),
     [pathname]
   )
+
+
   const selectedWorkflow = React.useMemo(
-    () => workflows.find((workflow) => workflow.id === selectedWorkflowId) ?? null,
+    () =>
+      workflows.find((workflow) => workflow.id === selectedWorkflowId) ?? null,
     [workflows, selectedWorkflowId]
   )
 
   const refreshWorkflows = React.useCallback(async () => {
     if (!isLoaded) return
+
+    const requestId = ++refreshRequest.current
     if (!orgId) {
       setWorkflows([])
       setError(null)
@@ -71,6 +77,8 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
     setIsLoading(true)
     try {
       const records = await listWorkflowsAction()
+      if (requestId !== refreshRequest.current) return
+
       setWorkflows(
         records.map((record) => ({
           id: record.id,
@@ -80,18 +88,23 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
       )
       setError(null)
     } catch (cause) {
+      if (requestId !== refreshRequest.current) return
+
       setError(
         cause instanceof Error ? cause.message : "Could not load workflows."
       )
     } finally {
-      setIsLoading(false)
+      if (requestId === refreshRequest.current) setIsLoading(false)
     }
   }, [isLoaded, orgId])
 
   React.useEffect(() => {
     if (!isLoaded) return
     const timer = window.setTimeout(() => void refreshWorkflows(), 0)
-    return () => window.clearTimeout(timer)
+    return () => {
+      window.clearTimeout(timer)
+      refreshRequest.current += 1
+    }
   }, [isLoaded, refreshWorkflows])
 
   const selectWorkflow = React.useCallback(
@@ -155,7 +168,9 @@ export function WorkflowProvider({ children }: { children: React.ReactNode }) {
 
 export function useWorkflows() {
   const context = React.useContext(WorkflowContext)
-  if (!context)
+  if (!context) {
+
     throw new Error("useWorkflows must be used within a WorkflowProvider")
+  }
   return context
 }
