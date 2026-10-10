@@ -1,75 +1,86 @@
+import { and, desc, eq } from "drizzle-orm"
+import { randomUUID } from "node:crypto"
+
 import { db } from "@/lib/db"
-import { workflows } from "@/lib/schema"
-import { eq, and, isNull } from "drizzle-orm"
-import { auth } from "@clerk/nextjs/server"
+import { workflows } from "@/lib/db/schema"
+import type { WorkflowGraph } from "@/lib/db/schema"
+import { validateGraph } from "@/features/workflows/lib/validate-graph"
 
-export interface WorkflowRecord {
+export async function saveWorkflowGraph({
+  orgId,
+  id,
+  graph,
+}: {
+  orgId: string
   id: string
-  name: string
-  description: string | null
-  status: "draft" | "active" | "archived"
-  triggerType: "webhook" | "schedule" | "manual" | null
-  triggerConfig: unknown
-  nodes: unknown[]
-  edges: unknown[]
-  organizationId: string | null
-  userId: string | null
-  createdAt: Date
-  updatedAt: Date
+  graph: WorkflowGraph
+}) {
+  const problems = validateGraph(graph, { runnable: false })
+  if (problems.length > 0) throw new Error(problems.join(" "))
+  const [updated] = await db
+    .update(workflows)
+    .set({ graph, updatedAt: new Date() })
+    .where(and(eq(workflows.id, id), eq(workflows.orgId, orgId)))
+    .returning({ id: workflows.id })
+
+  if (!updated) throw new Error("Workflow not found")
 }
 
-/**
- * Retrieves workflows authorized for the current Clerk user/organization.
- * - When orgId is present: returns workflows owned by the organization.
- * - When orgId is null: returns personal workflows (userId matches and organizationId is null).
- */
-export async function getWorkflows(): Promise<WorkflowRecord[]> {
-  const { userId, orgId } = await auth()
-  if (!userId) return []
-
-  if (orgId) {
-    const result = await db
-      .select()
-      .from(workflows)
-      .where(eq(workflows.organizationId, orgId))
-    return result as WorkflowRecord[]
-  }
-
-  const result = await db
-    .select()
+export function listWorkflows(orgId: string) {
+  return db
+    .select({
+      id: workflows.id,
+      name: workflows.name,
+      orgId: workflows.orgId,
+      createdAt: workflows.createdAt,
+    })
     .from(workflows)
-    .where(and(eq(workflows.userId, userId), isNull(workflows.organizationId)))
-
-  return result as WorkflowRecord[]
+    .where(eq(workflows.orgId, orgId))
+    .orderBy(desc(workflows.createdAt))
 }
 
-/**
- * Retrieves a single workflow by ID and validates ownership/organization authorization.
- * Returns null if the workflow does not exist or the requester is unauthorized.
- */
-export async function getWorkflowById(workflowId: string): Promise<WorkflowRecord | null> {
-  const { userId, orgId } = await auth()
-  if (!userId) return null
-
+export async function getWorkflow(orgId: string, id: string) {
   const [workflow] = await db
     .select()
     .from(workflows)
-    .where(eq(workflows.id, workflowId))
+    .where(and(eq(workflows.id, id), eq(workflows.orgId, orgId)))
 
-  if (!workflow) return null
+  return workflow
+}
 
-  const typedWorkflow = workflow as WorkflowRecord
+export async function createWorkflow(
+  orgId: string,
+  name: string,
+  graph: WorkflowGraph
+) {
+  const [workflow] = await db
+    .insert(workflows)
+    .values({ id: randomUUID(), orgId, name, graph })
+    .returning()
 
-  // Server-side multi-tenant authorization
-  if (orgId) {
-    if (typedWorkflow.organizationId !== orgId) {
-      return null
-    }
-  } else {
-    if (typedWorkflow.userId !== userId || typedWorkflow.organizationId !== null) {
-      return null
-    }
-  }
+  return workflow
+}
 
-  return typedWorkflow
+export async function deleteWorkflow(orgId: string, id: string) {
+  const [workflow] = await db
+    .delete(workflows)
+    .where(and(eq(workflows.id, id), eq(workflows.orgId, orgId)))
+    .returning()
+
+  return workflow
+}
+
+export async function renameWorkflow(
+  orgId: string,
+  id: string,
+  name: string
+) {
+  const [workflow] = await db
+    .update(workflows)
+    .set({ name, updatedAt: new Date() })
+    .where(and(eq(workflows.id, id), eq(workflows.orgId, orgId)))
+    .returning({ id: workflows.id, name: workflows.name })
+
+  if (!workflow) throw new Error("Workflow not found")
+  return workflow
 }
