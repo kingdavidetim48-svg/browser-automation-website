@@ -9,8 +9,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import { PanelLeft, Plus } from "lucide-react"
-import { WorkflowNodeIcon } from "@/features/workflows/components/node-icon"
+import { PanelLeft, Plus, Workflow } from "lucide-react"
 import { useWorkflows } from "@/features/workflows/hooks/use-workflows"
 import { UserButton, OrganizationSwitcher } from "@clerk/nextjs"
 import { NewWorkflowDialog } from "@/components/dashboard/new-workflow-dialog"
@@ -57,7 +56,7 @@ export function DashboardSidebar() {
                 )}
                 title="Workflows"
               >
-                <WorkflowNodeIcon className="size-4.5" />
+                <Workflow className="size-4.5" />
               </Button>
             </PopoverTrigger>
             <PopoverContent

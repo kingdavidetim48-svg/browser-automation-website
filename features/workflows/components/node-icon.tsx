@@ -1,19 +1,30 @@
-import * as React from "react"
+import { Spinner } from "@/components/ui/spinner"
+import { cn } from "../../../lib/utils"
 
-export function WorkflowNodeIcon({ className }: { className?: string }) {
+import { nodeRegistry, type NodeType } from "@/features/workflows/nodes/node-registry"
+
+// The accent-colored icon chip, mirroring the node on the canvas. Pass `running`
+// to swap the node's icon for a spinner inside the same colored chip.
+export function NodeIcon({
+  type,
+  running,
+  className,
+}: {
+  type: NodeType
+  running?: boolean
+  className?: string
+}) {
+  const def = nodeRegistry[type]
+  const Icon = def.icon
   return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
+    <span
+      className={cn(
+        "flex size-6 shrink-0 items-center justify-center rounded-md",
+        def.accent,
+        className
+      )}
     >
-      <rect x="3" y="3" width="7" height="7" rx="2" />
-      <rect x="14" y="14" width="7" height="7" rx="2" />
-      <path d="M10 6.5h3.5a2 2 0 0 1 2 2V14" />
-    </svg>
+      {running ? <Spinner className="size-3.5" /> : <Icon className="size-3.5" />}
+    </span>
   )
 }
