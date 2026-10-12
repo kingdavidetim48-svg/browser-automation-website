@@ -1,7 +1,7 @@
 import "server-only"
 import { Liveblocks } from "@liveblocks/node"
 
-let liveblocks: Liveblocks | undefined
+export let liveblocks: Liveblocks | undefined
 
 function getLiveblocksClient() {
   const secret = process.env.LIVEBLOCKS_SECRET_KEY

@@ -1,106 +1,86 @@
-"use client"
+import { memo } from "react"
+import { Handle, Position, type NodeProps } from "@xyflow/react"
 
-import { useEffect, useRef, useState } from "react"
-import { Loader2 } from "lucide-react"
+import {
+  nodeRegistry,
+  type StepNodeType,
+} from "@/features/workflows/nodes/node-registry"
+import { useLatestRunSteps } from "@/features/workflows/components/workflow-runs-provider"
+import { Spinner } from "@/components/ui/spinner"
+import { cn } from "@/lib/utils"
 
-// How long to wait between polls while Browserbase is still processing the
-// recording. The replay lags the session close by a few seconds; this keeps the
-// wait responsive without hammering the route.
-const POLL_INTERVAL_MS = 2000
+function StepNodeComponent({ id, data, selected }: NodeProps<StepNodeType>) {
+  const { type, kind, title, values } = data
+  const def = nodeRegistry[type]
+  const Icon = def.icon
+  const fields = def.fields.filter((field) => values[field.key])
 
-type Status = "loading" | "ready" | "error" | "unsupported"
+  // Reflect this node's state in the latest run. A node is only "running" while
+  // the run is actually live — once it ends, a node left marked running stops
+  // spinning rather than hanging forever.
+  const { steps, isLive } = useLatestRunSteps()
+  const status = steps.find((step) => step.nodeId === id)?.status
+  const isRunning = status === "running" && isLive
+  const isFailed = status === "failed"
 
-// Plays back a Browserbase session's recording from its session id. The playlist
-// is proxied through /api/replays/[sessionId] (which holds the secret key); this
-// polls that route until the recording is ready — it lags the session close —
-// then feeds the HLS playlist to hls.js.
-export function SessionReplay({ sessionId }: { sessionId: string }) {
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const [status, setStatus] = useState<Status>("loading")
-
-  // Reset to loading when the session changes, so a new id starts polling from
-  // scratch rather than showing the previous recording. Adjusting state during
-  // render (React's recommended pattern) instead of in the effect below.
-  const [renderedSessionId, setRenderedSessionId] = useState(sessionId)
-  if (sessionId !== renderedSessionId) {
-    setRenderedSessionId(sessionId)
-    setStatus("loading")
-  }
-
-  useEffect(() => {
-    const url = `/api/replays/${sessionId}`
-    let cancelled = false
-    let timer: ReturnType<typeof setTimeout> | undefined
-
-    // Poll until the route stops answering 202 (still processing). A 200 means
-    // the playlist exists and we can hand the URL to the player.
-    const waitForPlaylist = async () => {
-      try {
-        const res = await fetch(url)
-        if (cancelled) return
-
-        if (res.status === 202) {
-          timer = setTimeout(waitForPlaylist, POLL_INTERVAL_MS)
-          return
-        }
-        if (!res.ok) {
-          setStatus("error")
-          return
-        }
-
-        play()
-      } catch {
-        if (!cancelled) setStatus("error")
-      }
-    }
-
-    // Attach the ready playlist in browsers with native HLS support.
-    const play = () => {
-      const video = videoRef.current
-      if (!video) return
-
-      if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        video.src = url
-        setStatus("ready")
-      } else {
-        setStatus("unsupported")
-      }
-    }
-
-    waitForPlaylist()
-
-    return () => {
-      cancelled = true
-      if (timer) clearTimeout(timer)
-    }
-  }, [sessionId])
+  // A trigger starts the flow and takes no input, so it has no target handle.
+  const hasTarget = kind !== "trigger"
 
   return (
-    <div className="relative flex size-full items-center justify-center bg-black">
-      <video
-        ref={videoRef}
-        controls
-        className="size-full"
-        // Hidden until ready so the loading/error note shows through instead of an
-        // empty black frame.
-        style={{ display: status === "ready" ? "block" : "none" }}
+    <div
+      className={cn(
+        "min-w-50 max-w-80 rounded-(--radius) border-2 border-border bg-card text-card-foreground",
+        isRunning && "border-blue-500",
+        isFailed && "border-destructive",
+        selected && "ring-2 ring-ring ring-offset-2 ring-offset-background"
+      )}
+    >
+      {hasTarget && (
+        <Handle
+          type="target"
+          position={Position.Left}
+          style={{ transform: "translate(-100%, -50%)" }}
+          className="h-3.5! w-1.5! min-w-0! rounded-l-xs! rounded-r-none! border-0! bg-border!"
+        />
+      )}
+
+      <div className="flex items-center gap-2.5 px-3 py-2.5">
+        <div
+          className={cn(
+            "flex size-7 shrink-0 items-center justify-center rounded-md",
+            def.accent
+          )}
+        >
+          {isRunning ? <Spinner className="size-4" /> : <Icon className="size-4" />}
+        </div>
+        <span className="text-sm font-semibold">{title}</span>
+      </div>
+
+      {fields.length > 0 && (
+        <>
+          <div className="border-t border-border" />
+          <div className="flex flex-col gap-1.5 px-3 py-2.5">
+            {fields.map((field) => (
+              <div
+                key={field.key}
+                className="flex items-center justify-between gap-4 text-xs"
+              >
+                <span className="shrink-0 text-muted-foreground">{field.label}</span>
+                <span className="truncate font-medium">{values[field.key]}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      <Handle
+        type="source"
+        position={Position.Right}
+        style={{ transform: "translate(100%, -50%)" }}
+        className="h-3.5! w-1.5! min-w-0! rounded-l-none! rounded-r-xs! border-0! bg-border!"
       />
-      {status === "loading" && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" />
-          <span>Preparing recording…</span>
-        </div>
-      )}
-      {status === "error" && (
-        <div className="absolute inset-0 flex items-center justify-center p-3 text-center text-xs text-muted-foreground">
-          This recording couldn&apos;t be loaded.
-        </div>
-      )}
-      {status === "unsupported" && (
-        <div className="absolute inset-0 flex items-center justify-center p-3 text-center text-xs text-muted-foreground">
-          This browser can&apos;t play the recording.
-        </div>
-      )}
     </div>
   )
 }
+
+export const StepNode = memo(StepNodeComponent)
