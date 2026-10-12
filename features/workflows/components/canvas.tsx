@@ -289,7 +289,7 @@ function EditorCanvas({ workflow }: WorkflowCanvasProps) {
     setRunMessage("Queueing workflow…")
     try {
       const handle = await runWorkflowAction({
-        id: workflow.id,
+        workflowId: workflow.id,
         graph: currentGraph,
       })
       if (editRevision.current === revisionAtRun) setDirty(false)

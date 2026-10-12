@@ -17,6 +17,7 @@
 
 # production
 /build
+/.trigger
 
 # misc
 .DS_Store

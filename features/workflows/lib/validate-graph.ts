@@ -3,9 +3,6 @@ import toposort from "toposort"
 import type { WorkflowGraph } from "@/lib/db/schema"
 import { nodeRegistry } from "@/features/workflows/nodes/node-registry"
 
-// Structural problems knowable before a run — empty array means runnable. Pure
-// (no db import) so the client can pre-flight the in-hand graph and toast,
-// while the server reuses it as the save-time backstop.
 export function validateGraph(
   graph: WorkflowGraph,
   { runnable = true }: { runnable?: boolean } = {}

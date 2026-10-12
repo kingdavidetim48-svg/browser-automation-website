@@ -30,20 +30,54 @@ export type RunStep = {
   error?: string
 }
 
+export type RunWorkflowPayload = {
+  workflowId: string
+  organizationId: string
+}
+
+function parseRunWorkflowPayload(input: unknown): RunWorkflowPayload {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error(
+      'Invalid run-workflow payload. Expected { "workflowId": "...", "organizationId": "..." }. Start the run from the KingsFlow dashboard.'
+    )
+  }
+
+  const payload = input as Record<string, unknown>
+  const missing: string[] = []
+  if (typeof payload.workflowId !== "string" || !payload.workflowId.trim()) {
+    missing.push('"workflowId" (the selected workflow ID)')
+  }
+  if (
+    typeof payload.organizationId !== "string" ||
+    !payload.organizationId.trim()
+  ) {
+    missing.push('"organizationId" (the authenticated Clerk organization ID)')
+  }
+  if (missing.length) {
+    throw new Error(
+      `Invalid run-workflow payload: missing or invalid ${missing.join(" and ")}. Start the run from the KingsFlow dashboard so it supplies the selected workflow and active organization.`
+    )
+  }
+
+  return {
+    workflowId: (payload.workflowId as string).trim(),
+    organizationId: (payload.organizationId as string).trim(),
+  }
+}
+
 // The Trigger.dev task loads and validates the saved graph, computes a
 // topological execution order, and runs each action through its registered
 // executor while publishing progress and collected outputs.
 export const runWorkflowTask = task({
   id: "run-workflow",
-  run: async ({
-    workflowId,
-    orgId,
-  }: {
-    workflowId: string
-    orgId: string
-  }) => {
-    const workflow = await getWorkflow(orgId, workflowId)
-    if (!workflow) throw new Error(`Workflow ${workflowId} was not found`)
+  run: async (input: RunWorkflowPayload) => {
+    const { workflowId, organizationId } = parseRunWorkflowPayload(input)
+    const workflow = await getWorkflow(organizationId, workflowId)
+    if (!workflow) {
+      throw new Error(
+        `Workflow ${workflowId} was not found for organization ${organizationId}. Confirm the workflow still exists in the active organization and start it from the KingsFlow dashboard.`
+      )
+    }
 
     // The queued task reads the canonical graph after the authenticated action
     // has persisted the latest edits for this workflow ID.

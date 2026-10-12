@@ -3,10 +3,10 @@
 import * as Sentry from "@sentry/nextjs"
 import { auth } from "@clerk/nextjs/server"
 import { runs, tasks } from "@trigger.dev/sdk"
+import type { runWorkflowTask } from "@/src/trigger/run-workflow"
 import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
 
-import type { runWorkflowTask } from "@/features/workflows/tasks/run-workflow"
 
 import { deleteWorkflowRoom } from "@/lib/liveblocks"
 import {
@@ -145,11 +145,16 @@ export async function deleteWorkflowAction(id: string) {
   redirect("/")
 }
 
-export async function runWorkflowAction(
-  input: string | { id: string; graph?: WorkflowGraph }
-) {
-  const id = typeof input === "string" ? input : input.id
-  const graph = typeof input === "string" ? undefined : input.graph
+export async function runWorkflowAction(input: {
+  workflowId: string
+  graph?: WorkflowGraph
+}) {
+  const workflowId =
+    typeof input?.workflowId === "string" ? input.workflowId.trim() : ""
+  const graph = input?.graph
+  if (!workflowId) {
+    throw new Error("A workflow ID is required to start a workflow run.")
+  }
   const { orgId, has } = await auth()
 
   if (!orgId) {
@@ -162,10 +167,10 @@ export async function runWorkflowAction(
   Sentry.getIsolationScope().setAttributes({
     action: "runWorkflowAction",
     orgId,
-    workflowId: id,
+    workflowId,
   })
 
-  const workflow = await getWorkflow(orgId, id)
+  const workflow = await getWorkflow(orgId, workflowId)
   if (!workflow) throw new Error("Workflow not found")
 
   const graphToRun = graph ?? workflow.graph
@@ -179,17 +184,17 @@ export async function runWorkflowAction(
   )
   if (hasAgentNode && !has({ plan: "pro" })) {
     Sentry.logger.warn("Workflow run denied — Agent node requires Pro plan", {
-      workflowId: id,
+      workflowId,
       orgId,
     })
     throw new Error("The Agent node requires the Pro plan.")
   }
 
   try {
-    if (graph) await saveWorkflowGraph({ orgId, id, graph })
+    if (graph) await saveWorkflowGraph({ orgId, id: workflowId, graph })
   } catch (error) {
     Sentry.logger.error("Workflow graph could not be persisted before run", {
-      workflowId: id,
+      workflowId,
       orgId,
       error: error instanceof Error ? error.message : String(error),
     })
@@ -198,12 +203,12 @@ export async function runWorkflowAction(
 
   const handle = await tasks.trigger<typeof runWorkflowTask>(
     "run-workflow",
-    { workflowId: id, orgId },
-    { tags: [`workflow:${id}`] }
+    { workflowId, organizationId: orgId },
+    { tags: [`workflow:${workflowId}`] }
   )
 
   Sentry.logger.info("Workflow run triggered", {
-    workflowId: id,
+    workflowId,
     orgId,
     runId: handle.id,
     nodeCount: graphToRun.nodes.length,
