@@ -47,8 +47,7 @@ export default async function Page({
     expirationTime: "1hr",
   })
 
-  // The canvas and the sidebar's node palette live in separate components, so a
-  // single ReactFlowProvider wraps both to give them one shared React Flow store.
+ 
   return (
     <Room roomId={id}>
       <ReactFlowProvider>
