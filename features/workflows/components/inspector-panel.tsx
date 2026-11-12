@@ -1,13 +1,11 @@
 "use client"
 
 import { NodeIcon } from "@/features/workflows/components/node-icon"
+import { SessionReplay } from "@/features/workflows/components/session-replay"
 import {
   useConsoleRuns,
 } from "@/features/workflows/components/workflow-runs-provider"
-
-type ConsoleSelection =
-  | { kind: "replay"; runId: string }
-  | { kind: "step"; runId: string; nodeId: string }
+import type { ConsoleSelection } from "@/features/workflows/components/logs-panel"
 
 // A short, centered note for when there's nothing concrete to show.
 function Note({ children }: { children: React.ReactNode }) {
@@ -27,7 +25,10 @@ export function InspectorPanel({ selection }: { selection: ConsoleSelection }) {
 
   // A run's replay stands for the whole session — play it instead of any step.
   if (selection.kind === "replay") {
-    return <Note>This recording is no longer available.</Note>
+    if (!run?.browserbaseSessionId) {
+      return <Note>This recording is no longer available.</Note>
+    }
+    return <SessionReplay sessionId={run.browserbaseSessionId} />
   }
 
   const step = run?.steps.find((s) => s.nodeId === selection.nodeId)

@@ -3,7 +3,7 @@
 import * as Sentry from "@sentry/nextjs"
 import { auth } from "@clerk/nextjs/server"
 import { runs, tasks } from "@trigger.dev/sdk"
-import type { runWorkflowTask } from "@/src/trigger/run-workflow"
+import type { runWorkflowTask } from "@/features/workflows/tasks/run-workflow"
 import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
 
@@ -203,7 +203,7 @@ export async function runWorkflowAction(input: {
 
   const handle = await tasks.trigger<typeof runWorkflowTask>(
     "run-workflow",
-    { workflowId, organizationId: orgId },
+    { workflowId, orgId, organizationId: orgId },
     { tags: [`workflow:${workflowId}`] }
   )
 

@@ -3,6 +3,7 @@ import { ClerkProvider } from "@clerk/nextjs"
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/sonner"
+import { TooltipProvider } from "@/components/ui/tooltip"
 
 export default function RootLayout({
   children,
@@ -16,10 +17,14 @@ export default function RootLayout({
       className="font-sans antialiased"
     >
       <body className="min-h-screen bg-background text-foreground">
-        <ClerkProvider>
+        <ClerkProvider
+          taskUrls={{ "choose-organization": "/choose-organization" }}
+        >
           <ThemeProvider>
-            {children}
-            <Toaster />
+            <TooltipProvider>
+              {children}
+              <Toaster />
+            </TooltipProvider>
           </ThemeProvider>
         </ClerkProvider>
       </body>

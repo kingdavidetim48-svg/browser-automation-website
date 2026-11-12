@@ -52,7 +52,7 @@ export default async function Page({
     <Room roomId={id}>
       <ReactFlowProvider>
         <WorkflowRunsProvider workflowId={id} accessToken={runsToken}>
-          <WorkflowShell workflow={workflow} />
+          <WorkflowShell workflowId={id} />
         </WorkflowRunsProvider>
       </ReactFlowProvider>
     </Room>

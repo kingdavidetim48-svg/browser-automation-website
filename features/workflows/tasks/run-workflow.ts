@@ -28,14 +28,23 @@ export type RunStep = {
   error?: string
 }
 
+export type RunWorkflowPayload = {
+  workflowId: string
+  orgId?: string
+  organizationId?: string
+}
+
 // The Trigger.dev task the Run button fires. It loads the saved graph, works out
-// what order the nodes should run in, and walks them. For now each node just
-// announces itself — real execution (per-node executors, live progress, browser
-// sessions) gets layered on from here.
+// what order the nodes should run in, and walks them.
 export const runWorkflowTask = task({
   id: "run-workflow",
-  run: async ({ workflowId, orgId }: { workflowId: string; orgId: string }) => {
-    const workflow = await getWorkflow(orgId, workflowId)
+  run: async ({ workflowId, orgId, organizationId }: RunWorkflowPayload) => {
+    const effectiveOrgId = orgId || organizationId
+    if (!effectiveOrgId) {
+      throw new Error(`Run task received no organization ID for workflow ${workflowId}`)
+    }
+
+    const workflow = await getWorkflow(effectiveOrgId, workflowId)
     if (!workflow?.graph) throw new Error(`Workflow ${workflowId} has no graph`)
 
     const { nodes, edges } = workflow.graph
@@ -78,7 +87,7 @@ export const runWorkflowTask = task({
     // The run owns one Browserbase session, opened lazily on the first browser step
     // and reused by every later one, so the recording spans the whole flow. The
     // LLM routes through Browserbase's Model Gateway (BROWSERBASE_API_KEY), so no
-    // separate provider key is needed.
+    // separate provider key is needed for standard browser operations.
     let stagehand: Stagehand | undefined
     // The Browserbase session id, captured the moment the session opens so it can
     // be returned in the run's output — a panel reads it there to fetch the replay
@@ -86,13 +95,16 @@ export const runWorkflowTask = task({
     let browserbaseSessionId: string | undefined
     const getStagehand = async () => {
       if (stagehand) return stagehand
+      if (!process.env.BROWSERBASE_API_KEY) {
+        throw new Error("BROWSERBASE_API_KEY is not configured")
+      }
       stagehand = new Stagehand({
         env: "BROWSERBASE",
-        apiKey: process.env.BROWSERBASE_API_KEY!,
+        apiKey: process.env.BROWSERBASE_API_KEY,
+        projectId: process.env.BROWSERBASE_PROJECT_ID,
         model: "google/gemini-2.5-flash",
         // Pino's logging backend spawns a thread-stream worker (lib/worker.js)
-        // that can't be resolved inside trigger.dev's bundled output. Disable it —
-        // the option exists for exactly these minimal/bundled environments.
+        // that can't be resolved inside trigger.dev's bundled output. Disable it.
         disablePino: true,
       })
       await stagehand.init()
@@ -152,7 +164,11 @@ export const runWorkflowTask = task({
         step.error = error instanceof Error ? error.message : String(error)
         publishSteps()
         await metadata.flush()
-        await stagehand?.close()
+        try {
+          await stagehand?.close()
+        } catch {
+          // ignore cleanup errors during failure handling
+        }
         throw error
       }
 
@@ -161,7 +177,11 @@ export const runWorkflowTask = task({
       publishSteps()
     }
 
-    await stagehand?.close()
+    try {
+      await stagehand?.close()
+    } catch (error) {
+      logger.error("Failed to close the Stagehand session", { error })
+    }
 
     return { steps, browserbaseSessionId }
   },

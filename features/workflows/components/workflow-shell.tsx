@@ -4,22 +4,21 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable"
 
-import { WorkflowCanvas } from "./canvas"
-
+import { Canvas } from "./canvas"
 import { ConsolePanel } from "./console-panel"
 import { RightSidebar } from "./right-sidebar"
 
 interface WorkflowShellProps {
-  workflow: { id: string; name: string; graph: { nodes: any[]; edges: any[] } }
+  workflowId: string
 }
 
-export function WorkflowShell({ workflow }: WorkflowShellProps) {
+export function WorkflowShell({ workflowId }: WorkflowShellProps) {
   return (
     <ResizablePanelGroup orientation="horizontal" className="size-full">
       <ResizablePanel minSize="30rem">
         <ResizablePanelGroup orientation="vertical">
           <ResizablePanel minSize="18rem">
-            <WorkflowCanvas workflow={workflow} />
+            <Canvas />
           </ResizablePanel>
           <ResizableHandle />
           <ResizablePanel defaultSize="8rem" minSize="6rem">
@@ -29,7 +28,7 @@ export function WorkflowShell({ workflow }: WorkflowShellProps) {
       </ResizablePanel>
       <ResizableHandle />
       <ResizablePanel defaultSize="16rem" minSize="14rem" maxSize="36rem">
-        <RightSidebar workflowId={workflow.id} />
+        <RightSidebar workflowId={workflowId} />
       </ResizablePanel>
     </ResizablePanelGroup>
   )

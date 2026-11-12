@@ -22,4 +22,3 @@ export default function SignInPage() {
     </div>
   )
 }
-// https://youtube.com/shorts/3Y25H4FrYeo?si=eRTk6_xorcZQpvmf

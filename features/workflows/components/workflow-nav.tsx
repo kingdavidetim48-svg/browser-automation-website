@@ -5,7 +5,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { PlusIcon, WorkflowIcon } from "lucide-react"
 
-import { generateSlug } from "@/lib/generate-slug"
+import { generateSlug } from "@/features/workflows/lib/generate-slug"
 import {
   Popover,
   PopoverContent,

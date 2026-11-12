@@ -51,11 +51,24 @@ export async function getWorkflow(orgId: string, id: string) {
 export async function createWorkflow(
   orgId: string,
   name: string,
-  graph: WorkflowGraph
+  graph?: WorkflowGraph
 ) {
+  const initialGraph: WorkflowGraph = graph ?? {
+    nodes: [
+      {
+        id: "start",
+        type: "step",
+        position: { x: 80, y: 180 },
+        data: { type: "start", kind: "trigger", title: "Start", values: {} },
+      },
+    ],
+    edges: [],
+  }
+  const problems = validateGraph(initialGraph, { runnable: false })
+  if (problems.length > 0) throw new Error(problems.join(" "))
   const [workflow] = await db
     .insert(workflows)
-    .values({ id: randomUUID(), orgId, name, graph })
+    .values({ id: randomUUID(), orgId, name, graph: initialGraph })
     .returning()
 
   return workflow
