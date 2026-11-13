@@ -8,17 +8,11 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable"
 
-import { LogsPanel, type ConsoleSelection } from "./logs-panel"
-
-function InspectorPanel({ selection }: { selection: ConsoleSelection }) {
-  return (
-    <div className="h-full overflow-auto p-4">
-      <pre className="whitespace-pre-wrap text-sm">
-        {JSON.stringify(selection, null, 2)}
-      </pre>
-    </div>
-  )
-}
+import { InspectorPanel } from "@/features/workflows/components/inspector-panel"
+import {
+  LogsPanel,
+  type ConsoleSelection,
+} from "@/features/workflows/components/logs-panel"
 
 // True when two selections point at the same thing — same kind, same run, and
 // for a step the same node. Clicking the active selection again clears it.

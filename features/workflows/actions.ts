@@ -3,21 +3,16 @@
 import * as Sentry from "@sentry/nextjs"
 import { auth } from "@clerk/nextjs/server"
 import { runs, tasks } from "@trigger.dev/sdk"
-import type { runWorkflowTask } from "@/features/workflows/tasks/run-workflow"
 import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
 
-
-import { deleteWorkflowRoom } from "@/lib/liveblocks"
+import type { runWorkflowTask } from "@/src/trigger/run-workflow"
+import { liveblocks } from "@/lib/liveblocks"
 import {
   createWorkflow,
   deleteWorkflow,
-  getWorkflow,
-  listWorkflows,
-  renameWorkflow,
   saveWorkflowGraph,
 } from "@/features/workflows/data"
-import { validateGraph } from "@/features/workflows/lib/validate-graph"
 import type { WorkflowGraph } from "@/lib/db/schema"
 
 export async function createWorkflowAction(name: string) {
@@ -27,82 +22,17 @@ export async function createWorkflowAction(name: string) {
     throw new Error("No active organization")
   }
 
-  if (typeof name !== "string" || !name.trim() || name.trim().length > 256) {
-    throw new Error("Workflow name must contain 1 to 256 characters.")
-  }
-
   Sentry.getIsolationScope().setAttributes({
     action: "createWorkflowAction",
     orgId,
   })
 
-  const workflow = await createWorkflow(orgId, name.trim(), {
-    nodes: [
-      {
-        id: "start",
-        type: "step",
-        position: { x: 80, y: 180 },
-        data: { type: "start", kind: "trigger", title: "Start", values: {} },
-      },
-    ],
-    edges: [],
-    viewport: { x: 0, y: 0, zoom: 1 },
-  })
+  const workflow = await createWorkflow(orgId, name)
 
   Sentry.logger.info("Workflow created", { workflowId: workflow.id, orgId })
 
-  revalidatePath("/dashboard")
-  return workflow
-}
-
-export async function listWorkflowsAction() {
-  const { orgId } = await auth()
-  if (!orgId) throw new Error("No active organization")
-  return listWorkflows(orgId)
-}
-
-export async function getWorkflowAction(id: string) {
-  const { orgId } = await auth()
-  if (!orgId) throw new Error("No active organization")
-  const workflow = await getWorkflow(orgId, id)
-  if (!workflow) throw new Error("Workflow not found")
-  return workflow
-}
-
-export async function saveWorkflowGraphAction({
-  id,
-  graph,
-}: {
-  id: string
-  graph: WorkflowGraph
-}) {
-  const { orgId } = await auth()
-  if (!orgId) throw new Error("No active organization")
-  const workflow = await getWorkflow(orgId, id)
-  if (!workflow) throw new Error("Workflow not found")
-  await saveWorkflowGraph({ orgId, id, graph })
-  revalidatePath("/dashboard")
-  revalidatePath(`/workflows/${id}`)
-  return { updatedAt: new Date().toISOString() }
-}
-
-export async function renameWorkflowAction({
-  id,
-  name,
-}: {
-  id: string
-  name: string
-}) {
-  const { orgId } = await auth()
-  if (!orgId) throw new Error("No active organization")
-  if (typeof name !== "string" || !name.trim() || name.trim().length > 256) {
-    throw new Error("Workflow name must contain 1 to 256 characters.")
-  }
-
-  const workflow = await renameWorkflow(orgId, id, name.trim())
-  revalidatePath("/dashboard")
-  revalidatePath(`/workflows/${id}`)
-  return workflow
+  revalidatePath("/workflows", "layout")
+  redirect(`/workflows/${workflow.id}`)
 }
 
 export async function deleteWorkflowAction(id: string) {
@@ -128,14 +58,13 @@ export async function deleteWorkflowAction(id: string) {
     throw new Error("Workflow not found")
   }
 
-  // This editor does not use Liveblocks rooms. Clean up a legacy room when
-  // configured, but do not turn a successful database delete into a failure.
+  // The workflow id doubles as its Liveblocks room id — clean it up too.
   try {
-    await deleteWorkflowRoom(id)
-  } catch (error) {
-    Sentry.logger.warn("Legacy Liveblocks room cleanup failed", {
+    await liveblocks?.deleteRoom(id)
+  } catch (err) {
+    Sentry.logger.warn("Liveblocks room deletion failed", {
       workflowId: id,
-      error: error instanceof Error ? error.message : String(error),
+      error: err instanceof Error ? err.message : String(err),
     })
   }
 
@@ -146,92 +75,75 @@ export async function deleteWorkflowAction(id: string) {
 }
 
 export async function runWorkflowAction(input: {
-  workflowId: string
-  graph?: WorkflowGraph
+  id?: string
+  workflowId?: string
+  graph: WorkflowGraph
 }) {
-  const workflowId =
-    typeof input?.workflowId === "string" ? input.workflowId.trim() : ""
-  const graph = input?.graph
-  if (!workflowId) {
-    throw new Error("A workflow ID is required to start a workflow run.")
-  }
   const { orgId, has } = await auth()
 
   if (!orgId) {
     throw new Error("No active organization")
   }
 
-  // The Agent node is Pro-only. Enforce it here rather than in the run task: the
-  // action holds the Clerk session (and has()), while the Trigger.dev task runs
-  // with no auth context. has() evaluates the active org, confirmed above.
+  const effectiveId = (input.id || input.workflowId)?.trim()
+  if (!effectiveId) {
+    throw new Error("A workflow ID is required to start a workflow run.")
+  }
+
+  const graph = input.graph
+  if (!graph) {
+    throw new Error("Workflow has no saved graph")
+  }
+
   Sentry.getIsolationScope().setAttributes({
     action: "runWorkflowAction",
     orgId,
-    workflowId,
+    workflowId: effectiveId,
   })
 
-  const workflow = await getWorkflow(orgId, workflowId)
-  if (!workflow) throw new Error("Workflow not found")
-
-  const graphToRun = graph ?? workflow.graph
-  if (!graphToRun) throw new Error("Workflow has no saved graph")
-
-  const graphProblems = validateGraph(graphToRun)
-  if (graphProblems.length > 0) throw new Error(graphProblems.join(" "))
-
-  const hasAgentNode = graphToRun.nodes.some(
-    (node) => node.data.type === "agent"
-  )
+  const hasAgentNode = graph.nodes.some((node) => node.data.type === "agent")
   if (hasAgentNode && !has({ plan: "pro" })) {
     Sentry.logger.warn("Workflow run denied — Agent node requires Pro plan", {
-      workflowId,
+      workflowId: effectiveId,
       orgId,
     })
     throw new Error("The Agent node requires the Pro plan.")
   }
 
   try {
-    if (graph) await saveWorkflowGraph({ orgId, id: workflowId, graph })
+    await saveWorkflowGraph({ orgId, id: effectiveId, graph })
   } catch (error) {
-    Sentry.logger.error("Workflow graph could not be persisted before run", {
-      workflowId,
+    Sentry.logger.warn("Workflow run blocked — graph validation failed", {
+      workflowId: effectiveId,
       orgId,
-      error: error instanceof Error ? error.message : String(error),
     })
     throw error
   }
 
   const handle = await tasks.trigger<typeof runWorkflowTask>(
     "run-workflow",
-    { workflowId, orgId, organizationId: orgId },
-    { tags: [`workflow:${workflowId}`] }
+    { workflowId: effectiveId, organizationId: orgId },
+    { tags: [`workflow:${effectiveId}`] }
   )
 
   Sentry.logger.info("Workflow run triggered", {
-    workflowId,
+    workflowId: effectiveId,
     orgId,
     runId: handle.id,
-    nodeCount: graphToRun.nodes.length,
+    nodeCount: graph.nodes.length,
     hasAgentNode,
   })
 
   return handle
 }
 
-export async function cancelWorkflowRunAction({
-  workflowId,
-  runId,
-}: {
-  workflowId: string
-  runId: string
-}) {
+export async function cancelWorkflowRunAction(
+  input: string | { workflowId?: string; runId: string }
+) {
   const { orgId } = await auth()
   if (!orgId) throw new Error("No active organization")
-  const workflow = await getWorkflow(orgId, workflowId)
-  if (!workflow) throw new Error("Workflow not found")
-  const run = await runs.retrieve(runId)
-  if (!run.tags.includes(`workflow:${workflowId}`))
-    throw new Error("Run does not belong to this workflow.")
+
+  const runId = typeof input === "string" ? input : input.runId
 
   Sentry.getIsolationScope().setAttributes({
     action: "cancelWorkflowRunAction",
@@ -242,44 +154,4 @@ export async function cancelWorkflowRunAction({
   await runs.cancel(runId)
 
   Sentry.logger.info("Workflow run cancelled", { runId, orgId })
-}
-
-export async function getWorkflowRunStatusAction({
-  workflowId,
-  runId,
-}: {
-  workflowId: string
-  runId: string
-}) {
-  const { orgId } = await auth()
-  if (!orgId) throw new Error("No active organization")
-  const workflow = await getWorkflow(orgId, workflowId)
-  if (!workflow) throw new Error("Workflow not found")
-
-  const run = await runs.retrieve(runId)
-  if (!run.tags.includes(`workflow:${workflowId}`)) {
-    throw new Error("Run does not belong to this workflow.")
-  }
-
-  const failedStatuses = [
-    "FAILED",
-    "CRASHED",
-    "SYSTEM_FAILURE",
-    "TIMED_OUT",
-    "EXPIRED",
-    "CANCELED",
-  ]
-  const terminal = ["COMPLETED", ...failedStatuses].includes(run.status)
-  return {
-    status:
-      run.status === "COMPLETED"
-        ? ("completed" as const)
-        : failedStatuses.includes(run.status)
-          ? ("failed" as const)
-          : ["EXECUTING", "WAITING", "DEQUEUED"].includes(run.status)
-            ? ("running" as const)
-            : ("queued" as const),
-    terminal,
-    error: run.error?.message,
-  }
 }

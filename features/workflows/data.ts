@@ -28,12 +28,7 @@ export async function saveWorkflowGraph({
 
 export function listWorkflows(orgId: string) {
   return db
-    .select({
-      id: workflows.id,
-      name: workflows.name,
-      orgId: workflows.orgId,
-      createdAt: workflows.createdAt,
-    })
+    .select()
     .from(workflows)
     .where(eq(workflows.orgId, orgId))
     .orderBy(desc(workflows.createdAt))

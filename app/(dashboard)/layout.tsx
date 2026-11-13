@@ -1,10 +1,15 @@
-﻿import * as React from "react"
-import { DashboardLayout } from "@/components/dashboard/dashboard-layout"
+﻿import { AppSidebar } from "@/components/app-sidebar"
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 
-export default function DashboardRouteLayout({
+export default function DashboardLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode
-}) {
-  return <DashboardLayout>{children}</DashboardLayout>
+}>) {
+  return (
+    <SidebarProvider className="h-svh">
+      <AppSidebar />
+      <SidebarInset className="min-h-0 overflow-hidden border shadow-none!">{children}</SidebarInset>
+    </SidebarProvider>
+  )
 }
