@@ -1,5 +1,5 @@
 import { Spinner } from "@/components/ui/spinner"
-import { cn } from "../../../lib/utils"
+import { cn } from "@/lib/utils"
 
 import { nodeRegistry, type NodeType } from "@/features/workflows/nodes/node-registry"
 
