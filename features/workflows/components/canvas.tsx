@@ -3,6 +3,8 @@
 import { useSyncExternalStore } from "react"
 import { useTheme } from "next-themes"
 import {
+  Background,
+  BackgroundVariant,
   Controls,
   ReactFlow,
   ConnectionLineType,
@@ -27,7 +29,7 @@ const initialNodes: StepNodeType[] = [
   {
     id: "start",
     type: "step",
-    position: { x: 0, y: 0 },
+    position: { x: 100, y: 100 },
     data: { type: "start", kind: "trigger", title: "Start", values: {} },
   },
 ]
@@ -71,24 +73,30 @@ export function Canvas() {
         onDelete={onDelete}
         colorMode={colorMode}
         fitView
+        fitViewOptions={{ padding: 0.4 }}
+        snapToGrid={true}
+        snapGrid={[20, 20]}
         connectionLineType={ConnectionLineType.SmoothStep}
-        connectionLineStyle={{ stroke: "var(--border)" }}
+        connectionLineStyle={{ stroke: "var(--border)", strokeWidth: 2 }}
         defaultEdgeOptions={{
           type: "smoothstep",
-          style: { stroke: "var(--border)" },
+          style: { stroke: "var(--border)", strokeWidth: 2 },
         }}
         style={
           {
             "--xy-background-color": "var(--background)",
             "--xy-edge-stroke-width": 2,
             "--xy-connectionline-stroke-width": 2,
+            "--xy-background-pattern-color": "var(--border)",
           } as React.CSSProperties
         }
-        maxZoom={1}
+        maxZoom={1.5}
+        minZoom={0.3}
       >
-        <Controls />
+        <Background variant={BackgroundVariant.Dots} gap={20} size={1.5} />
+        <Controls position="bottom-left" className="m-3 shadow-md" />
         <Cursors />
-        <Panel position="top-right">
+        <Panel position="top-right" className="m-3">
           <AvatarStack />
         </Panel>
       </ReactFlow>

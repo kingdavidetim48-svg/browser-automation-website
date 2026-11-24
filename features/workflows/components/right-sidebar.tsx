@@ -2,8 +2,9 @@
 
 import { useState, useTransition } from "react"
 import { useReactFlow, useStore } from "@xyflow/react"
-import { Lock, MoreHorizontal, Play, Square, Trash2 } from "lucide-react"
+import { Lock, MoreHorizontal, Play, Sliders, Square, Trash2 } from "lucide-react"
 import { toast } from "sonner"
+import { cn } from "@/lib/utils"
 
 import {
   Accordion,
@@ -20,7 +21,6 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { ResizablePanel } from "@/components/ui/resizable"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 
@@ -56,17 +56,26 @@ import {
 function Section({
   title,
   icon,
+  description,
   children,
 }: {
   title: string
   icon?: React.ReactNode
+  description?: string
   children: React.ReactNode
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-2 border-y border-border bg-card px-3 py-1.5 text-sm font-semibold">
-        {icon}
-        {title}
+      <div className="flex items-center justify-between border-b border-border/80 bg-card/60 px-3.5 py-2.5 backdrop-blur-xs">
+        <div className="flex items-center gap-2">
+          {icon}
+          <div>
+            <h3 className="text-xs font-semibold tracking-wide text-foreground">{title}</h3>
+            {description && (
+              <p className="text-[10px] text-muted-foreground">{description}</p>
+            )}
+          </div>
+        </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
     </div>
@@ -127,8 +136,18 @@ function Inspector({ node }: { node: StepNodeType | undefined }) {
 
   if (!node) {
     return (
-      <Section title="Editor">
-        <p className="p-3 text-sm text-muted-foreground">No node selected</p>
+      <Section title="Editor" description="Properties & parameters">
+        <div className="flex h-72 flex-col items-center justify-center gap-3 p-6 text-center">
+          <div className="flex size-11 items-center justify-center rounded-2xl border border-border/80 bg-muted/40 text-muted-foreground shadow-xs">
+            <Sliders className="size-5" />
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs font-semibold text-foreground">No node selected</p>
+            <p className="text-xs text-muted-foreground max-w-[210px] leading-relaxed">
+              Select a step on the canvas to configure its properties and parameters.
+            </p>
+          </div>
+        </div>
       </Section>
     )
   }
@@ -147,16 +166,18 @@ function Inspector({ node }: { node: StepNodeType | undefined }) {
   }
 
   return (
-    <Section title={title} icon={<NodeIcon type={type} />}>
-      <div className="flex flex-col gap-3 p-3">
+    <Section title={title} description={def.description} icon={<NodeIcon type={type} />}>
+      <div className="flex flex-col gap-3.5 p-3.5">
         {def.fields.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No properties</p>
+          <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-center">
+            <p className="text-xs text-muted-foreground">This step requires no configuration.</p>
+          </div>
         ) : (
           def.fields.map((field) => (
             <div key={field.key} className="flex flex-col gap-1.5">
-              <Label htmlFor={field.key} className="text-xs">
+              <Label htmlFor={field.key} className="text-xs font-medium">
                 {field.label}
-                {field.required && <span className="text-destructive">*</span>}
+                {field.required && <span className="text-destructive ml-0.5">*</span>}
               </Label>
               <Field
                 field={field}
@@ -175,18 +196,21 @@ function Inspector({ node }: { node: StepNodeType | undefined }) {
         {/* Available upstream outputs — click to drop a token into the last
             focused field (or the first field if none has been touched). */}
         {connections.length > 0 && (
-          <div className="flex flex-col gap-1.5">
-            <Label className="text-xs">Connections</Label>
+          <div className="flex flex-col gap-2 pt-1 border-t border-border/60">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-medium text-foreground">Available Variables</Label>
+              <span className="text-[10px] text-muted-foreground">Click to insert</span>
+            </div>
             <div className="flex flex-wrap gap-1.5">
               {connections.map((connection) => (
                 <button
                   key={connection.token}
                   type="button"
                   onClick={() => insertToken(connection.token)}
-                  className="flex max-w-full items-center gap-1.5 rounded-md border border-border bg-card px-1.5 py-1 text-xs hover:bg-accent"
+                  className="flex max-w-full items-center gap-1.5 rounded-md border border-border/80 bg-background/80 px-2 py-1 text-xs hover:bg-accent hover:border-accent transition-colors"
                 >
-                  <NodeIcon type={connection.nodeType} className="size-4" />
-                  <span className="truncate">{connection.label}</span>
+                  <NodeIcon type={connection.nodeType} className="size-3.5" />
+                  <span className="truncate font-mono text-[11px]">{connection.label}</span>
                 </button>
               ))}
             </div>
@@ -271,41 +295,53 @@ function Palette() {
   }
 
   return (
-    <Section title="Toolbar">
+    <Section title="Toolbar" description="Click any step to add to canvas">
       <Accordion
         type="multiple"
         defaultValue={sections.map((s) => s.kind)}
-        className="px-3 py-2"
+        className="px-2.5 py-1"
       >
         {sections.map((section) => (
           <AccordionItem
             key={section.kind}
             value={section.kind}
-            className="not-last:border-b-0"
+            className="border-b border-border/60 py-1"
           >
-            <AccordionTrigger className="py-2 text-xs font-medium text-muted-foreground hover:no-underline">
+            <AccordionTrigger className="py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:no-underline">
               {section.label}
             </AccordionTrigger>
-            <AccordionContent className="flex flex-col gap-0.5">
+            <AccordionContent className="flex flex-col gap-1 pb-2">
               {definitions
                 .filter((def) => def.kind === section.kind)
                 .map((def) => {
                   const type = def.type as NodeType
                   const locked = isLocked(type)
                   return (
-                    <Button
+                    <button
                       key={def.type}
-                      variant="ghost"
+                      type="button"
                       onClick={() => add(type)}
                       title={locked ? "Upgrade to Pro to add this node" : undefined}
-                      className="justify-start gap-2.5 px-1.5 text-xs"
-                    >
-                      <NodeIcon type={type} />
-                      {def.label}
-                      {locked && (
-                        <Lock className="ml-auto size-3.5 text-muted-foreground" />
+                      className={cn(
+                        "group flex w-full items-start gap-2.5 rounded-lg border border-transparent p-2 text-left transition-all hover:border-border hover:bg-muted/50 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring",
+                        locked && "opacity-75"
                       )}
-                    </Button>
+                    >
+                      <NodeIcon type={type} className="mt-0.5" />
+                      <div className="flex min-w-0 flex-1 flex-col">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-medium text-foreground group-hover:text-primary transition-colors">
+                            {def.label}
+                          </span>
+                          {locked && (
+                            <Lock className="size-3 text-muted-foreground" />
+                          )}
+                        </div>
+                        <span className="line-clamp-2 text-[11px] text-muted-foreground leading-normal">
+                          {def.description}
+                        </span>
+                      </div>
+                    </button>
                   )
                 })}
             </AccordionContent>
@@ -327,11 +363,11 @@ function ActionsMenu({ workflowId }: { workflowId: string }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size="icon" variant="ghost">
-          <MoreHorizontal />
+        <Button size="icon" variant="ghost" className="size-8 text-muted-foreground hover:text-foreground">
+          <MoreHorizontal className="size-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-48">
+      <DropdownMenuContent align="end" className="min-w-48">
         <DropdownMenuItem
           variant="destructive"
           disabled={isPending}
@@ -370,6 +406,7 @@ function RunButton({ workflowId }: { workflowId: string }) {
         size="sm"
         variant="destructive"
         disabled={isPending}
+        className="h-8 gap-1.5 text-xs font-medium px-3 shadow-xs"
         onClick={() => {
           startTransition(async () => {
             try {
@@ -380,7 +417,7 @@ function RunButton({ workflowId }: { workflowId: string }) {
           })
         }}
       >
-        <Square fill="currentColor" />
+        <Square className="size-3 fill-current" />
         Stop
       </Button>
     )
@@ -389,8 +426,9 @@ function RunButton({ workflowId }: { workflowId: string }) {
   return (
     <Button
       size="sm"
-      variant="secondary"
+      variant="default"
       disabled={isPending}
+      className="h-8 gap-1.5 text-xs font-medium px-3 shadow-xs bg-primary text-primary-foreground hover:bg-primary/90"
       onClick={() => {
         const graph = { nodes: getNodes(), edges: getEdges() }
         const problems = validateGraph(graph)
@@ -404,7 +442,7 @@ function RunButton({ workflowId }: { workflowId: string }) {
         })
       }}
     >
-      <Play fill="primary" />
+      <Play className="size-3 fill-current" />
       Run
     </Button>
   )
@@ -428,39 +466,35 @@ export function RightSidebar({ workflowId }: { workflowId: string }) {
   }
 
   return (
-    <ResizablePanel
-      className="bg-background"
-      defaultSize="16rem"
-      minSize="14rem"
-      maxSize="36rem"
-      groupResizeBehavior="preserve-pixel-size"
-    >
-      <Tabs value={tab} onValueChange={setTab} className="size-full gap-0">
-        <div className="flex items-center justify-between border-b border-border p-2">
-          <ActionsMenu workflowId={workflowId} />
-          <RunButton workflowId={workflowId} />
+    <div className="flex size-full min-h-0 flex-col border-l border-border bg-card">
+      <Tabs value={tab} onValueChange={setTab} className="flex size-full min-h-0 flex-col gap-0">
+        <div className="flex shrink-0 items-center justify-between border-b border-border bg-card/80 px-2.5 py-2">
+          <TabsList className="h-8 w-44 grid grid-cols-2 bg-muted/60 p-0.5">
+            <TabsTrigger
+              value="toolbar"
+              className="h-7 rounded-sm text-xs font-medium data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs"
+            >
+              Toolbar
+            </TabsTrigger>
+            <TabsTrigger
+              value="editor"
+              className="h-7 rounded-sm text-xs font-medium data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs"
+            >
+              Editor
+            </TabsTrigger>
+          </TabsList>
+          <div className="flex items-center gap-1.5">
+            <ActionsMenu workflowId={workflowId} />
+            <RunButton workflowId={workflowId} />
+          </div>
         </div>
-        <TabsList className="m-2 w-fit bg-background">
-          <TabsTrigger
-            value="toolbar"
-            className="flex-none rounded-sm data-active:bg-accent! data-active:text-accent-foreground! data-active:shadow-none! dark:data-active:border-transparent!"
-          >
-            Toolbar
-          </TabsTrigger>
-          <TabsTrigger
-            value="editor"
-            className="flex-none rounded-sm data-active:bg-accent! data-active:text-accent-foreground! data-active:shadow-none! dark:data-active:border-transparent!"
-          >
-            Editor
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="toolbar" className="flex min-h-0 flex-col">
+        <TabsContent value="toolbar" className="mt-0 flex min-h-0 flex-1 flex-col overflow-hidden">
           <Palette />
         </TabsContent>
-        <TabsContent value="editor" className="flex min-h-0 flex-col">
+        <TabsContent value="editor" className="mt-0 flex min-h-0 flex-1 flex-col overflow-hidden">
           <Inspector key={selected?.id} node={selected} />
         </TabsContent>
       </Tabs>
-    </ResizablePanel>
+    </div>
   )
 }

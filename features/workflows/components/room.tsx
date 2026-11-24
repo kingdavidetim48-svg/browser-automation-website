@@ -5,7 +5,7 @@ import {
   LiveblocksProvider,
   RoomProvider,
   ClientSideSuspense,
-} from "@liveblocks/react";
+} from "@liveblocks/react/suspense";
 import { Spinner } from "@/components/ui/spinner";
 
 export function Room({

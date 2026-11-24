@@ -1,6 +1,7 @@
 "use client"
 
-import { Lock, MonitorPlay } from "lucide-react"
+import prettyMilliseconds from "pretty-ms"
+import { Lock, MonitorPlay, Terminal } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
@@ -11,29 +12,6 @@ import {
   type ConsoleRun,
 } from "@/features/workflows/components/workflow-runs-provider"
 import type { RunStep } from "@/features/workflows/tasks/run-workflow"
-
-function formatDuration(milliseconds: number) {
-  if (milliseconds < 1000) return `${Math.round(milliseconds)}ms`
-
-  const seconds = milliseconds / 1000
-  if (seconds < 60) return `${Number(seconds.toFixed(2))}s`
-
-  const minutes = Math.floor(seconds / 60)
-  const remainingSeconds = Math.floor(seconds % 60)
-  if (minutes < 60) {
-    return remainingSeconds ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`
-  }
-
-  const hours = Math.floor(minutes / 60)
-  const remainingMinutes = minutes % 60
-  if (hours < 24) {
-    return remainingMinutes ? `${hours}h ${remainingMinutes}m` : `${hours}h`
-  }
-
-  const days = Math.floor(hours / 24)
-  const remainingHours = hours % 24
-  return remainingHours ? `${days}d ${remainingHours}h` : `${days}d`
-}
 
 // A step is identified across the whole console by which run it belongs to and
 // which node it is — the same node id recurs across runs, so both are needed.
@@ -78,18 +56,18 @@ function StepRow({
       type="button"
       onClick={() => onSelect({ kind: "step", runId: run.id, nodeId: step.nodeId })}
       className={cn(
-        "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-accent",
-        isSelected && "bg-accent",
+        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-muted/60",
+        isSelected && "bg-accent font-medium text-accent-foreground shadow-xs",
         isInactive && "opacity-50"
       )}
     >
       <NodeIcon type={step.type} running={isRunning} />
-      <span className={cn("truncate font-medium", isFailed && "text-destructive")}>
+      <span className={cn("truncate font-medium text-foreground", isFailed && "text-destructive font-semibold")}>
         {step.title}
       </span>
       {step.durationMs != null && (
-        <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
-          {formatDuration(step.durationMs)}
+        <span className="ml-auto shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
+          {prettyMilliseconds(step.durationMs)}
         </span>
       )}
     </button>
@@ -121,14 +99,14 @@ function ReplayRow({
       }
       title={isLocked ? "Upgrade to Pro to watch replays" : undefined}
       className={cn(
-        "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-accent",
-        isSelected && "bg-accent"
+        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-muted/60",
+        isSelected && "bg-accent font-medium text-accent-foreground shadow-xs"
       )}
     >
       <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
         <MonitorPlay className="size-3.5" />
       </span>
-      <span className="truncate font-medium">Replay</span>
+      <span className="truncate font-medium">Replay Recording</span>
       {isLocked && (
         <Lock className="ml-auto size-3.5 shrink-0 text-muted-foreground" />
       )}
@@ -150,44 +128,69 @@ export function LogsPanel({
 
   if (runs.length === 0) {
     return (
-      <div className="flex size-full items-center justify-center text-sm text-muted-foreground">
-        No runs yet
+      <div className="flex size-full flex-col items-center justify-center gap-2.5 p-6 text-center">
+        <div className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-border/80 bg-muted/40 text-muted-foreground shadow-xs">
+          <Terminal className="size-4" />
+        </div>
+        <div className="space-y-0.5">
+          <p className="text-xs font-semibold text-foreground">No execution history</p>
+          <p className="text-xs text-muted-foreground">
+            Click <span className="font-semibold text-foreground">Run</span> in the toolbar to execute this workflow
+          </p>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="flex size-full flex-col gap-3 overflow-y-auto p-2">
+    <div className="flex size-full flex-col gap-2.5 overflow-y-auto p-2.5">
       {runs.map((run) => (
-        <div key={run.id} className="flex flex-col gap-0.5">
-          <div className="flex items-center gap-2 px-2 py-1 text-xs font-medium text-muted-foreground">
-            <span>{run.createdAt.toLocaleTimeString()}</span>
-            <span className="lowercase">{run.status}</span>
+        <div key={run.id} className="flex flex-col gap-1 rounded-lg border border-border/60 bg-card/40 p-1.5">
+          <div className="flex items-center justify-between px-1.5 py-1 text-[11px] font-medium text-muted-foreground">
+            <div className="flex items-center gap-1.5">
+              <span className={cn(
+                "size-2 rounded-full",
+                run.status === "COMPLETED" && "bg-emerald-500",
+                run.status === "FAILED" && "bg-destructive",
+                run.isLive && "bg-blue-500 animate-pulse"
+              )} />
+              <span className="font-mono text-[11px]">{run.createdAt.toLocaleTimeString()}</span>
+            </div>
+            <span className={cn(
+              "rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
+              run.status === "COMPLETED" && "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20",
+              run.status === "FAILED" && "bg-destructive/10 text-destructive border border-destructive/20",
+              run.isLive && "bg-blue-500/10 text-blue-400 border border-blue-500/20"
+            )}>
+              {run.status}
+            </span>
           </div>
-          {run.steps.map((step) => (
-            <StepRow
-              key={step.nodeId}
-              run={run}
-              step={step}
-              isSelected={
-                selected?.kind === "step" &&
-                selected.runId === run.id &&
-                selected.nodeId === step.nodeId
-              }
-              onSelect={onSelect}
-            />
-          ))}
-          {/* A recording only exists once the run has finished — its session id
-              is present and it's no longer live. */}
-          {run.browserbaseSessionId && !run.isLive && (
-            <ReplayRow
-              run={run}
-              isSelected={
-                selected?.kind === "replay" && selected.runId === run.id
-              }
-              onSelect={onSelect}
-            />
-          )}
+          <div className="flex flex-col gap-0.5">
+            {run.steps.map((step) => (
+              <StepRow
+                key={step.nodeId}
+                run={run}
+                step={step}
+                isSelected={
+                  selected?.kind === "step" &&
+                  selected.runId === run.id &&
+                  selected.nodeId === step.nodeId
+                }
+                onSelect={onSelect}
+              />
+            ))}
+            {/* A recording only exists once the run has finished — its session id
+                is present and it's no longer live. */}
+            {run.browserbaseSessionId && !run.isLive && (
+              <ReplayRow
+                run={run}
+                isSelected={
+                  selected?.kind === "replay" && selected.runId === run.id
+                }
+                onSelect={onSelect}
+              />
+            )}
+          </div>
         </div>
       ))}
     </div>

@@ -10,7 +10,7 @@ export async function deleteWorkflowRoom(roomId: string) {
   if (!liveblocks) return
   try {
     await liveblocks.deleteRoom(roomId)
-  } catch (_error) {
+  } catch {
     // Best effort cleanup: never fail workflow deletion if room cleanup fails
   }
 }

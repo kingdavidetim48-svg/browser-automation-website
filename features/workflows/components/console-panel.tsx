@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { Terminal } from "lucide-react"
 
 import {
   ResizableHandle,
@@ -36,18 +37,29 @@ export function ConsolePanel() {
   }
 
   return (
-    <ResizablePanelGroup orientation="horizontal" className="size-full">
-      <ResizablePanel minSize="12rem">
-        <LogsPanel selected={selected} onSelect={toggle} />
-      </ResizablePanel>
-      {selected && (
-        <>
-          <ResizableHandle withHandle />
-          <ResizablePanel defaultSize="20rem" minSize="12rem">
-            <InspectorPanel selection={selected} />
+    <div className="flex size-full flex-col bg-card/60 backdrop-blur-xs">
+      <div className="flex shrink-0 items-center justify-between border-b border-border/80 bg-card/90 px-3.5 py-1.5">
+        <div className="flex items-center gap-2">
+          <Terminal className="size-3.5 text-muted-foreground" />
+          <span className="text-xs font-semibold tracking-wide text-foreground">Console</span>
+        </div>
+        <span className="text-[10px] text-muted-foreground">Execution & Replays</span>
+      </div>
+      <div className="min-h-0 flex-1">
+        <ResizablePanelGroup orientation="horizontal" className="size-full">
+          <ResizablePanel defaultSize={selected ? "55%" : "100%"} minSize="200px">
+            <LogsPanel selected={selected} onSelect={toggle} />
           </ResizablePanel>
-        </>
-      )}
-    </ResizablePanelGroup>
+          {selected && (
+            <>
+              <ResizableHandle withHandle />
+              <ResizablePanel defaultSize="45%" minSize="240px">
+                <InspectorPanel selection={selected} />
+              </ResizablePanel>
+            </>
+          )}
+        </ResizablePanelGroup>
+      </div>
+    </div>
   )
 }

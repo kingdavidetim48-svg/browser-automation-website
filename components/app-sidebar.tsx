@@ -40,6 +40,7 @@ export async function AppSidebar({
         <WorkflowNav
           workflows={workflows}
           onCreateWorkflow={createWorkflowAction}
+          disabled={!orgId}
         />
       </SidebarContent>
       <SidebarFooter className="group-data-[collapsible=icon]:items-center">
@@ -57,4 +58,3 @@ export async function AppSidebar({
     </Sidebar>
   )
 }
-

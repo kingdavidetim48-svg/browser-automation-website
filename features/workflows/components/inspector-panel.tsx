@@ -37,17 +37,20 @@ export function InspectorPanel({ selection }: { selection: ConsoleSelection }) {
   if (!step) return <Note>This step is no longer available.</Note>
 
   return (
-    <div className="flex size-full flex-col">
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-        <NodeIcon type={step.type} />
-        <span className="truncate text-xs font-semibold">{step.title}</span>
+    <div className="flex size-full flex-col bg-card/30">
+      <div className="flex items-center gap-2 border-b border-border/80 bg-card/70 px-3 py-2">
+        <NodeIcon type={step.type} className="size-5" />
+        <span className="truncate text-xs font-semibold text-foreground">{step.title}</span>
+        <span className="ml-auto rounded bg-muted/60 px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
+          Output
+        </span>
       </div>
       {step.error ? (
-        <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs text-destructive">
+        <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words bg-destructive/5 p-3 font-mono text-xs text-destructive">
           {step.error}
         </pre>
       ) : step.output !== undefined ? (
-        <pre className="min-h-0 flex-1 overflow-auto p-3 font-mono text-xs">
+        <pre className="min-h-0 flex-1 overflow-auto p-3 font-mono text-[11px] leading-relaxed text-foreground/90 selection:bg-primary/20">
           {JSON.stringify(step.output, null, 2)}
         </pre>
       ) : step.status === "pending" ? (

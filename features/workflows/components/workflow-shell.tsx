@@ -15,19 +15,21 @@ interface WorkflowShellProps {
 export function WorkflowShell({ workflowId }: WorkflowShellProps) {
   return (
     <ResizablePanelGroup orientation="horizontal" className="size-full">
-      <ResizablePanel minSize="30rem">
+      <ResizablePanel defaultSize="75%" minSize="50%">
         <ResizablePanelGroup orientation="vertical">
-          <ResizablePanel minSize="18rem">
+          <ResizablePanel defaultSize="75%" minSize="40%">
             <Canvas />
           </ResizablePanel>
-          <ResizableHandle />
-          <ResizablePanel defaultSize="8rem" minSize="6rem">
+          <ResizableHandle withHandle />
+          <ResizablePanel defaultSize="25%" minSize="140px" maxSize="60%">
             <ConsolePanel />
           </ResizablePanel>
         </ResizablePanelGroup>
       </ResizablePanel>
-      <ResizableHandle />
-      <RightSidebar workflowId={workflowId} />
+      <ResizableHandle withHandle />
+      <ResizablePanel defaultSize="25%" minSize="300px" maxSize="460px">
+        <RightSidebar workflowId={workflowId} />
+      </ResizablePanel>
     </ResizablePanelGroup>
   )
 }

@@ -7,6 +7,3 @@ export default function ChooseOrganizationPage() {
     </div>
   )
 }
-
-// mi mi so re mi mi re do na your grace dey carry me go
-// la do la la so la mi re do re do re do re so la ti do
