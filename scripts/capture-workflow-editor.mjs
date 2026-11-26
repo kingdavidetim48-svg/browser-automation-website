@@ -47,8 +47,7 @@ async function run() {
   console.log("Navigating to sign-in with ticket...");
   await page.goto(signInUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
   console.log("Initial sign-in page loaded, waiting for Clerk session...");
-  
-  // Wait up to 10s for Clerk to process the ticket and redirect or authenticate
+
   try {
     await page.waitForFunction(() => !!window.Clerk?.user, { timeout: 15000 });
     console.log("Clerk user authenticated!");
@@ -67,44 +66,75 @@ async function run() {
   await page.waitForSelector(".react-flow__node-step", { timeout: 20000 });
   await new Promise((r) => setTimeout(r, 2000));
 
-  // Take screenshot 1366x768 initial (Toolbar open)
-  await page.screenshot({ path: path.join(OUT_DIR, "workflow_1366x768_toolbar_open.png") });
-  await page.screenshot({ path: path.join(ARTIFACT_DIR, "workflow_1366x768_toolbar_open.png") });
-  console.log("Saved: workflow_1366x768_toolbar_open.png");
+  // Screenshot 1: 1366x768 initial with canvas top bar and toolbar
+  await page.screenshot({ path: path.join(OUT_DIR, "milestone1_1366x768_initial.png") });
+  await page.screenshot({ path: path.join(ARTIFACT_DIR, "milestone1_1366x768_initial.png") });
+  console.log("Saved: milestone1_1366x768_initial.png");
 
-  // Click on a step node to select it and test Editor tab
+  // Try clicking an action from the Toolbar to add a new node
   try {
-    const stepNode = await page.$(".react-flow__node-step");
-    if (stepNode) {
-      console.log("Clicking step node to select it and open Editor tab...");
-      await stepNode.click();
+    const actionButtons = await page.$$("button");
+    let openUrlBtn = null;
+    for (const btn of actionButtons) {
+      const text = await page.evaluate((el) => el.innerText, btn);
+      if (text && text.includes("Open URL")) {
+        openUrlBtn = btn;
+        break;
+      }
+    }
+    if (openUrlBtn) {
+      console.log("Found 'Open URL' button, clicking to add node...");
+      await openUrlBtn.click();
       await new Promise((r) => setTimeout(r, 1500));
-      await page.screenshot({ path: path.join(OUT_DIR, "workflow_1366x768_node_selected.png") });
-      await page.screenshot({ path: path.join(ARTIFACT_DIR, "workflow_1366x768_node_selected.png") });
-      console.log("Saved: workflow_1366x768_node_selected.png");
-    } else {
-      console.log("No .react-flow__node-step found");
     }
   } catch (err) {
-    console.error("Failed to click step node:", err.message);
+    console.log("Notice on adding node:", err.message);
   }
 
-  // Viewports test
-  const viewports = [
-    { name: "1440x900", width: 1440, height: 900 },
-    { name: "1920x1080", width: 1920, height: 1080 },
-  ];
-
-  for (const vp of viewports) {
-    await page.setViewport({ width: vp.width, height: vp.height });
-    await new Promise((r) => setTimeout(r, 1500));
-    await page.screenshot({ path: path.join(OUT_DIR, `workflow_${vp.name}_toolbar_open.png`) });
-    await page.screenshot({ path: path.join(ARTIFACT_DIR, `workflow_${vp.name}_toolbar_open.png`) });
-    console.log(`Saved: workflow_${vp.name}_toolbar_open.png`);
+  // Hover over the newly added node or step node
+  const nodes = await page.$$(".react-flow__node-step");
+  console.log(`Found ${nodes.length} nodes on canvas`);
+  if (nodes.length > 1) {
+    const lastNode = nodes[nodes.length - 1];
+    await lastNode.hover();
+    await new Promise((r) => setTimeout(r, 800));
   }
+
+  await page.screenshot({ path: path.join(OUT_DIR, "milestone1_1366x768_with_nodes.png") });
+  await page.screenshot({ path: path.join(ARTIFACT_DIR, "milestone1_1366x768_with_nodes.png") });
+  console.log("Saved: milestone1_1366x768_with_nodes.png");
+
+  // Click Auto Layout button
+  try {
+    const autoLayoutBtn = await page.$("button[title*='Auto Layout']");
+    if (autoLayoutBtn) {
+      console.log("Clicking Auto Layout button...");
+      await autoLayoutBtn.click();
+      await new Promise((r) => setTimeout(r, 1500));
+      await page.screenshot({ path: path.join(OUT_DIR, "milestone1_1366x768_autolayout.png") });
+      await page.screenshot({ path: path.join(ARTIFACT_DIR, "milestone1_1366x768_autolayout.png") });
+      console.log("Saved: milestone1_1366x768_autolayout.png");
+    }
+  } catch (err) {
+    console.log("Notice on auto-layout:", err.message);
+  }
+
+  // Viewport 1440x900
+  await page.setViewport({ width: 1440, height: 900 });
+  await new Promise((r) => setTimeout(r, 1500));
+  await page.screenshot({ path: path.join(OUT_DIR, "milestone1_1440x900.png") });
+  await page.screenshot({ path: path.join(ARTIFACT_DIR, "milestone1_1440x900.png") });
+  console.log("Saved: milestone1_1440x900.png");
+
+  // Viewport 1920x1080
+  await page.setViewport({ width: 1920, height: 1080 });
+  await new Promise((r) => setTimeout(r, 1500));
+  await page.screenshot({ path: path.join(OUT_DIR, "milestone1_1920x1080.png") });
+  await page.screenshot({ path: path.join(ARTIFACT_DIR, "milestone1_1920x1080.png") });
+  console.log("Saved: milestone1_1920x1080.png");
 
   await browser.close();
-  console.log("Screenshots captured successfully!");
+  console.log("All Milestone 1 screenshots captured successfully!");
 }
 
 run().catch((err) => {

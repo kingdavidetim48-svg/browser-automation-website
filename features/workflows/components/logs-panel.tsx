@@ -1,7 +1,18 @@
 "use client"
 
+import { useState } from "react"
 import prettyMilliseconds from "pretty-ms"
-import { Lock, MonitorPlay, Terminal } from "lucide-react"
+import {
+  AlertCircle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Clock,
+  Lock,
+  MonitorPlay,
+  SkipForward,
+  Terminal,
+} from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
@@ -13,27 +24,44 @@ import {
 } from "@/features/workflows/components/workflow-runs-provider"
 import type { RunStep } from "@/features/workflows/tasks/run-workflow"
 
-// A step is identified across the whole console by which run it belongs to and
-// which node it is — the same node id recurs across runs, so both are needed.
 export interface StepSelection {
   kind: "step"
   runId: string
   nodeId: string
 }
 
-// The replay of a whole run, not a single step — identified by its run alone.
 export interface ReplaySelection {
   kind: "replay"
   runId: string
 }
 
-// What the console can have selected: one step's output, or one run's replay.
-// Only one is active at a time.
 export type ConsoleSelection = StepSelection | ReplaySelection
 
-// One step row: the node's icon, its title, and how long it took. It spins while
-// running, reads red when it failed, and dims when it never ran. Clicking it
-// toggles selection via the ConsolePanel above.
+function StepStatusBadge({
+  status,
+  isLive,
+}: {
+  status: RunStep["status"]
+  isLive: boolean
+}) {
+  const effective =
+    !isLive && (status === "running" || status === "queued") ? "skipped" : status
+
+  if (effective === "completed") {
+    return <CheckCircle2 className="size-3.5 shrink-0 text-emerald-500" />
+  }
+  if (effective === "failed") {
+    return <AlertCircle className="size-3.5 shrink-0 text-destructive" />
+  }
+  if (effective === "queued") {
+    return <Clock className="size-3.5 shrink-0 text-amber-500" />
+  }
+  if (effective === "skipped") {
+    return <SkipForward className="size-3.5 shrink-0 text-muted-foreground" />
+  }
+  return null
+}
+
 function StepRow({
   run,
   step,
@@ -45,37 +73,43 @@ function StepRow({
   isSelected: boolean
   onSelect: (selection: StepSelection) => void
 }) {
-  // Only spin while the run is actually live — a step left "running" by a run
-  // that has since ended should stop rather than hang forever.
   const isRunning = step.status === "running" && run.isLive
   const isFailed = step.status === "failed"
-  const isInactive = step.status === "pending"
+  const isInactive = step.status === "queued" || step.status === "skipped"
 
   return (
     <button
       type="button"
-      onClick={() => onSelect({ kind: "step", runId: run.id, nodeId: step.nodeId })}
+      onClick={() =>
+        onSelect({ kind: "step", runId: run.id, nodeId: step.nodeId })
+      }
       className={cn(
         "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-muted/60",
         isSelected && "bg-accent font-medium text-accent-foreground shadow-xs",
-        isInactive && "opacity-50"
+        isInactive && "opacity-65"
       )}
     >
       <NodeIcon type={step.type} running={isRunning} />
-      <span className={cn("truncate font-medium text-foreground", isFailed && "text-destructive font-semibold")}>
+      <span
+        className={cn(
+          "truncate font-medium text-foreground",
+          isFailed && "text-destructive font-semibold"
+        )}
+      >
         {step.title}
       </span>
-      {step.durationMs != null && (
-        <span className="ml-auto shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
-          {prettyMilliseconds(step.durationMs)}
-        </span>
-      )}
+      <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        {step.durationMs != null && (
+          <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+            {prettyMilliseconds(step.durationMs)}
+          </span>
+        )}
+        <StepStatusBadge status={step.status} isLive={run.isLive} />
+      </div>
     </button>
   )
 }
 
-// The replay row for a finished run: it sits with the step rows and selects the
-// same way, but it stands for the whole run's recording rather than one step.
 function ReplayRow({
   run,
   isSelected,
@@ -85,15 +119,12 @@ function ReplayRow({
   isSelected: boolean
   onSelect: (selection: ReplaySelection) => void
 }) {
-  // Watching a recording is a Pro feature. Wait for `isLoaded` so a Pro org
-  // never flashes a locked state on mount.
   const { isLoaded, isPro, goToUpgrade } = useProPlan()
   const isLocked = isLoaded && !isPro
 
   return (
     <button
       type="button"
-      // Locked rows send the user to upgrade instead of opening the recording.
       onClick={() =>
         isLocked ? goToUpgrade() : onSelect({ kind: "replay", runId: run.id })
       }
@@ -114,9 +145,140 @@ function ReplayRow({
   )
 }
 
-// The list of runs, newest first, each with its steps below it. Reads the shared
-// realtime run history and reports step clicks up to the ConsolePanel, which owns
-// the selection.
+function RunCard({
+  run,
+  defaultExpanded,
+  selected,
+  onSelect,
+}: {
+  run: ConsoleRun
+  defaultExpanded: boolean
+  selected: ConsoleSelection | null
+  onSelect: (selection: ConsoleSelection) => void
+}) {
+  const [showEvents, setShowEvents] = useState(defaultExpanded)
+
+  return (
+    <div className="flex flex-col gap-1 rounded-lg border border-border/60 bg-card/40 p-1.5">
+      <div className="flex items-center justify-between gap-2 px-1.5 py-1 text-[11px] font-medium text-muted-foreground">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span
+            className={cn(
+              "size-2 shrink-0 rounded-full",
+              run.status === "COMPLETED" && "bg-emerald-500",
+              run.status === "FAILED" && "bg-destructive",
+              run.status === "CANCELLED" && "bg-amber-500",
+              run.isLive && "bg-blue-500 animate-pulse"
+            )}
+          />
+          <span className="font-mono text-[11px]">
+            {run.createdAt.toLocaleTimeString()}
+          </span>
+          <span
+            title={`Execution ID: ${run.id}`}
+            className="font-mono text-[10px] text-muted-foreground/80 truncate"
+          >
+            #{run.id.slice(0, 8)}
+          </span>
+          {run.durationMs != null && (
+            <span className="font-mono text-[10px] text-muted-foreground">
+              ({prettyMilliseconds(run.durationMs)})
+            </span>
+          )}
+        </div>
+        <span
+          className={cn(
+            "rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider shrink-0",
+            run.status === "COMPLETED" &&
+            "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20",
+            run.status === "FAILED" &&
+            "bg-destructive/10 text-destructive border border-destructive/20",
+            run.status === "CANCELLED" &&
+            "bg-amber-500/10 text-amber-500 border border-amber-500/20",
+            run.isLive &&
+            "bg-blue-500/10 text-blue-400 border border-blue-500/20"
+          )}
+        >
+          {run.status}
+        </span>
+      </div>
+
+      {run.error && (
+        <div className="mx-1.5 rounded border border-destructive/30 bg-destructive/5 px-2 py-1 text-[11px] text-destructive">
+          {run.error}
+        </div>
+      )}
+
+      <div className="flex flex-col gap-0.5">
+        {run.steps.map((step) => (
+          <StepRow
+            key={step.nodeId}
+            run={run}
+            step={step}
+            isSelected={
+              selected?.kind === "step" &&
+              selected.runId === run.id &&
+              selected.nodeId === step.nodeId
+            }
+            onSelect={onSelect}
+          />
+        ))}
+        {run.browserbaseSessionId && !run.isLive && (
+          <ReplayRow
+            run={run}
+            isSelected={
+              selected?.kind === "replay" && selected.runId === run.id
+            }
+            onSelect={onSelect}
+          />
+        )}
+      </div>
+
+      {run.logs.length > 0 && (
+        <div className="mt-1 border-t border-border/50 pt-1">
+          <button
+            type="button"
+            onClick={() => setShowEvents((v) => !v)}
+            className="flex w-full items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
+          >
+            {showEvents ? (
+              <ChevronDown className="size-3" />
+            ) : (
+              <ChevronRight className="size-3" />
+            )}
+            Event Log ({run.logs.length})
+          </button>
+          {showEvents && (
+            <div className="mt-1 flex max-h-36 flex-col gap-0.5 overflow-y-auto px-1.5 pb-1 font-mono text-[10px]">
+              {run.logs.map((log) => (
+                <div
+                  key={log.id}
+                  className={cn(
+                    "flex items-start gap-2 rounded px-1 py-0.5",
+                    log.level === "error" && "bg-destructive/10 text-destructive",
+                    log.level === "warn" && "bg-amber-500/10 text-amber-500",
+                    log.level === "info" && "text-muted-foreground"
+                  )}
+                >
+                  <span className="shrink-0 opacity-75">
+                    {new Date(log.createdAt).toLocaleTimeString()}
+                  </span>
+                  <span className="shrink-0 rounded bg-muted/60 px-1 text-[9px] text-foreground/80">
+                    {log.eventType}
+                  </span>
+                  <span className="min-w-0 flex-1 break-words text-foreground/90">
+                    {log.message}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function LogsPanel({
   selected,
   onSelect,
@@ -133,9 +295,12 @@ export function LogsPanel({
           <Terminal className="size-4" />
         </div>
         <div className="space-y-0.5">
-          <p className="text-xs font-semibold text-foreground">No execution history</p>
+          <p className="text-xs font-semibold text-foreground">
+            No execution history
+          </p>
           <p className="text-xs text-muted-foreground">
-            Click <span className="font-semibold text-foreground">Run</span> in the toolbar to execute this workflow
+            Click <span className="font-semibold text-foreground">Run</span> in
+            the toolbar to execute this workflow
           </p>
         </div>
       </div>
@@ -144,54 +309,14 @@ export function LogsPanel({
 
   return (
     <div className="flex size-full flex-col gap-2.5 overflow-y-auto p-2.5">
-      {runs.map((run) => (
-        <div key={run.id} className="flex flex-col gap-1 rounded-lg border border-border/60 bg-card/40 p-1.5">
-          <div className="flex items-center justify-between px-1.5 py-1 text-[11px] font-medium text-muted-foreground">
-            <div className="flex items-center gap-1.5">
-              <span className={cn(
-                "size-2 rounded-full",
-                run.status === "COMPLETED" && "bg-emerald-500",
-                run.status === "FAILED" && "bg-destructive",
-                run.isLive && "bg-blue-500 animate-pulse"
-              )} />
-              <span className="font-mono text-[11px]">{run.createdAt.toLocaleTimeString()}</span>
-            </div>
-            <span className={cn(
-              "rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
-              run.status === "COMPLETED" && "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20",
-              run.status === "FAILED" && "bg-destructive/10 text-destructive border border-destructive/20",
-              run.isLive && "bg-blue-500/10 text-blue-400 border border-blue-500/20"
-            )}>
-              {run.status}
-            </span>
-          </div>
-          <div className="flex flex-col gap-0.5">
-            {run.steps.map((step) => (
-              <StepRow
-                key={step.nodeId}
-                run={run}
-                step={step}
-                isSelected={
-                  selected?.kind === "step" &&
-                  selected.runId === run.id &&
-                  selected.nodeId === step.nodeId
-                }
-                onSelect={onSelect}
-              />
-            ))}
-            {/* A recording only exists once the run has finished — its session id
-                is present and it's no longer live. */}
-            {run.browserbaseSessionId && !run.isLive && (
-              <ReplayRow
-                run={run}
-                isSelected={
-                  selected?.kind === "replay" && selected.runId === run.id
-                }
-                onSelect={onSelect}
-              />
-            )}
-          </div>
-        </div>
+      {runs.map((run, index) => (
+        <RunCard
+          key={run.id}
+          run={run}
+          defaultExpanded={index === 0}
+          selected={selected}
+          onSelect={onSelect}
+        />
       ))}
     </div>
   )

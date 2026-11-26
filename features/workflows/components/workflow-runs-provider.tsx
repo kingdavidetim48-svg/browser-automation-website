@@ -1,45 +1,302 @@
 "use client"
 
-import { createContext, useContext, useMemo } from "react"
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
+import { useEventListener } from "@liveblocks/react/suspense"
 import { useRealtimeRunsWithTag } from "@trigger.dev/react-hooks"
 
 import type { RunStep, runWorkflowTask } from "../tasks/run-workflow"
+import type {
+  ExecutionLog,
+  ExecutionNodeRun,
+  ExecutionStatus,
+  NodeExecutionStatus,
+  WorkflowExecution,
+} from "@/lib/db/schema"
+import type { NodeType } from "@/features/workflows/nodes/node-registry"
 
-type WorkflowRun = ReturnType<
+type TriggerWorkflowRun = ReturnType<
   typeof useRealtimeRunsWithTag<typeof runWorkflowTask>
 >["runs"][number]
 
+export type SerializedExecution = Omit<
+  WorkflowExecution,
+  "startedAt" | "completedAt" | "createdAt"
+> & {
+  startedAt: string | null
+  completedAt: string | null
+  createdAt: string
+  nodeRuns: Array<
+    Omit<ExecutionNodeRun, "startedAt" | "completedAt"> & {
+      startedAt: string | null
+      completedAt: string | null
+    }
+  >
+  logs: Array<
+    Omit<ExecutionLog, "createdAt"> & {
+      createdAt: string
+    }
+  >
+}
+
+export interface ConsoleRun {
+  id: string
+  triggerRunId: string | null
+  status: ExecutionStatus
+  createdAt: Date
+  startedAt: Date | null
+  completedAt: Date | null
+  durationMs: number | null
+  totalNodes: number
+  completedNodes: number
+  failedNodes: number
+  error: string | null
+  isLive: boolean
+  steps: RunStep[]
+  logs: SerializedExecution["logs"]
+  browserbaseSessionId?: string
+}
+
 interface WorkflowRunsContextValue {
-  runs: WorkflowRun[]
+  executions: ConsoleRun[]
+  isLoading: boolean
   error?: Error
+  refresh: () => Promise<void>
 }
 
 const WorkflowRunsContext = createContext<WorkflowRunsContextValue | null>(null)
 
 interface WorkflowRunsProviderProps {
   workflowId: string
-  // A Public Access Token scoped to read this workflow's runs, minted on the
-  // server (auth.createPublicToken) and handed down as a prop.
   accessToken: string
   children: React.ReactNode
 }
 
-// One shared realtime subscription to every run tagged workflow:<id>. Any
-// component on the canvas reads it through the hooks below instead of opening
-// its own socket.
+function isExecutionLive(status: ExecutionStatus): boolean {
+  return status === "PENDING" || status === "QUEUED" || status === "RUNNING"
+}
+
+function mapTriggerStatus(
+  status: TriggerWorkflowRun["status"],
+  fallback: ExecutionStatus
+): ExecutionStatus {
+  switch (status) {
+    case "QUEUED":
+    case "DELAYED":
+    case "PENDING_VERSION":
+      return "QUEUED"
+    case "EXECUTING":
+    case "DEQUEUED":
+    case "WAITING":
+      return "RUNNING"
+    case "COMPLETED":
+      return "COMPLETED"
+    case "CANCELED":
+      return "CANCELLED"
+    case "FAILED":
+    case "CRASHED":
+    case "TIMED_OUT":
+    case "SYSTEM_FAILURE":
+    case "EXPIRED":
+      return "FAILED"
+    default:
+      return fallback
+  }
+}
+
+function mapLegacyStepStatus(status: string): NodeExecutionStatus {
+  if (status === "pending") return "queued"
+  if (status === "done") return "completed"
+  if (
+    status === "idle" ||
+    status === "queued" ||
+    status === "running" ||
+    status === "completed" ||
+    status === "failed" ||
+    status === "skipped"
+  ) {
+    return status
+  }
+  return "idle"
+}
+
 export function WorkflowRunsProvider({
   workflowId,
   accessToken,
   children,
 }: WorkflowRunsProviderProps) {
-  const { runs, error } = useRealtimeRunsWithTag<typeof runWorkflowTask>(
-    `workflow:${workflowId}`,
-    { accessToken }
+  const { runs: triggerRuns, error } = useRealtimeRunsWithTag<
+    typeof runWorkflowTask
+  >(`workflow:${workflowId}`, { accessToken })
+
+  const [dbExecutions, setDbExecutions] = useState<SerializedExecution[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const fetchingRef = useRef(false)
+  const pendingRefetchRef = useRef(false)
+
+  const refresh = useCallback(async () => {
+    if (fetchingRef.current) {
+      pendingRefetchRef.current = true
+      return
+    }
+    fetchingRef.current = true
+    try {
+      do {
+        pendingRefetchRef.current = false
+        try {
+          const res = await fetch(`/api/workflows/${workflowId}/executions`, {
+            cache: "no-store",
+          })
+          if (res.ok) {
+            const data = (await res.json()) as {
+              executions: SerializedExecution[]
+            }
+            setDbExecutions(data.executions ?? [])
+          }
+        } catch {
+          // Retain last known executions on transient network error
+        }
+      } while (pendingRefetchRef.current)
+    } finally {
+      setIsLoading(false)
+      fetchingRef.current = false
+    }
+  }, [workflowId])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  // Real-time synchronization across all connected authenticated Liveblocks sessions
+  useEventListener(({ event }) => {
+    if (event?.type === "EXECUTION_UPDATED") {
+      void refresh()
+    }
+  })
+
+  // Also refresh persisted execution logs/details when Trigger.dev run state advances
+  const triggerSignature = useMemo(
+    () =>
+      triggerRuns
+        .map(
+          (r) =>
+            `${r.id}:${r.status}:${
+              Array.isArray(r.metadata?.steps) ? r.metadata.steps.length : 0
+            }`
+        )
+        .join("|"),
+    [triggerRuns]
   )
 
+  useEffect(() => {
+    if (triggerRuns.length > 0) {
+      void refresh()
+    }
+  }, [triggerSignature, triggerRuns.length, refresh])
+
+  const executions = useMemo<ConsoleRun[]>(() => {
+    const triggerByRunId = new Map(triggerRuns.map((r) => [r.id, r]))
+
+    return dbExecutions.map((exec) => {
+      const triggerRun = exec.triggerRunId
+        ? triggerByRunId.get(exec.triggerRunId)
+        : undefined
+
+      const dbSteps: RunStep[] = exec.nodeRuns.map((nr) => ({
+        nodeId: nr.nodeId,
+        type: nr.nodeType as NodeType,
+        title: nr.nodeTitle,
+        status: nr.status,
+        durationMs: nr.durationMs ?? undefined,
+        startedAt: nr.startedAt ?? undefined,
+        completedAt: nr.completedAt ?? undefined,
+        input: nr.input ?? undefined,
+        output: nr.output ?? undefined,
+        error: nr.error ?? undefined,
+      }))
+
+      const triggerStepsRaw =
+        triggerRun?.output?.steps ??
+        (triggerRun?.metadata?.steps as RunStep[] | undefined)
+
+      // Merge live Trigger.dev step updates onto persisted DB node runs
+      const triggerStepMap = new Map(
+        (triggerStepsRaw ?? []).map((s) => [s.nodeId, s])
+      )
+      const mergedSteps: RunStep[] =
+        dbSteps.length > 0
+          ? dbSteps.map((dbStep) => {
+              const liveStep = triggerStepMap.get(dbStep.nodeId)
+              if (!liveStep) return dbStep
+              const liveStatus = mapLegacyStepStatus(liveStep.status)
+              // Prefer terminal DB status if execution already finished
+              const useDb = !isExecutionLive(exec.status)
+              return {
+                ...dbStep,
+                status: useDb ? dbStep.status : liveStatus,
+                durationMs: dbStep.durationMs ?? liveStep.durationMs,
+                startedAt: dbStep.startedAt ?? liveStep.startedAt,
+                completedAt: dbStep.completedAt ?? liveStep.completedAt,
+                input: dbStep.input ?? liveStep.input,
+                output: dbStep.output ?? liveStep.output,
+                error: dbStep.error ?? liveStep.error,
+              }
+            })
+          : (triggerStepsRaw ?? []).map((s) => ({
+              ...s,
+              status: mapLegacyStepStatus(s.status),
+            }))
+
+      const status =
+        triggerRun && isExecutionLive(exec.status)
+          ? mapTriggerStatus(triggerRun.status, exec.status)
+          : exec.status
+
+      const createdAt = new Date(exec.createdAt)
+      const startedAt = exec.startedAt ? new Date(exec.startedAt) : null
+      const completedAt = exec.completedAt ? new Date(exec.completedAt) : null
+      const durationMs =
+        startedAt && completedAt
+          ? Math.max(0, completedAt.getTime() - startedAt.getTime())
+          : null
+
+      return {
+        id: exec.id,
+        triggerRunId: exec.triggerRunId,
+        status,
+        createdAt,
+        startedAt,
+        completedAt,
+        durationMs,
+        totalNodes: exec.totalNodes || mergedSteps.length,
+        completedNodes:
+          mergedSteps.filter((s) => s.status === "completed").length ||
+          exec.completedNodes,
+        failedNodes:
+          mergedSteps.filter((s) => s.status === "failed").length ||
+          exec.failedNodes,
+        error: exec.error,
+        isLive: isExecutionLive(status),
+        steps: mergedSteps,
+        logs: exec.logs ?? [],
+        browserbaseSessionId:
+          exec.browserbaseSessionId ??
+          triggerRun?.output?.browserbaseSessionId ??
+          undefined,
+      }
+    })
+  }, [dbExecutions, triggerRuns])
+
   const value = useMemo<WorkflowRunsContextValue>(
-    () => ({ runs, error }),
-    [runs, error]
+    () => ({ executions, isLoading, error, refresh }),
+    [executions, isLoading, error, refresh]
   )
 
   return (
@@ -59,86 +316,44 @@ function useWorkflowRuns() {
   return ctx
 }
 
-// A run is still producing steps while it's queued or executing.
-function isRunLive(run: WorkflowRun): boolean {
-  return run.status === "QUEUED" || run.status === "EXECUTING"
+export function useWorkflowExecutionState() {
+  const { executions, isLoading, error, refresh } = useWorkflowRuns()
+  const latestExecution = executions[0]
+  const activeExecution = executions.find((e) => e.isLive)
+  return {
+    executions,
+    latestExecution,
+    activeExecution,
+    isLoading,
+    error,
+    refresh,
+  }
 }
 
-// The steps of a run, wherever they live. Prefer the run's final output steps
-// (guaranteed once it succeeds) and fall back to the live metadata steps the
-// task publishes while it runs — a failed or in-flight run only has the latter.
-function stepsForRun(run: WorkflowRun): RunStep[] {
-  const metadataSteps = run.metadata?.steps as RunStep[] | undefined
-  return run.output?.steps ?? metadataSteps ?? []
-}
-
-interface LatestRunSteps {
+export function useLatestRunSteps(): {
   steps: RunStep[]
-  // True while the latest run is queued or executing — i.e. still producing steps.
   isLive: boolean
+  execution?: ConsoleRun
+} {
+  const { executions } = useWorkflowRuns()
+
+  return useMemo(() => {
+    const latest = executions[0]
+    if (!latest) return { steps: [], isLive: false, execution: undefined }
+    return {
+      steps: latest.steps,
+      isLive: latest.isLive,
+      execution: latest,
+    }
+  }, [executions])
 }
 
-// The steps of the most recent run, plus whether it's still going.
-export function useLatestRunSteps(): LatestRunSteps {
-  const { runs } = useWorkflowRuns()
-
-  return useMemo<LatestRunSteps>(() => {
-    const latest = runs.reduce<WorkflowRun | undefined>((newest, run) => {
-      if (!newest || run.createdAt > newest.createdAt) return run
-      return newest
-    }, undefined)
-
-    if (!latest) return { steps: [], isLive: false }
-
-    return { steps: stepsForRun(latest), isLive: isRunLive(latest) }
-  }, [runs])
+export function useLiveRun(): ConsoleRun | undefined {
+  const { executions } = useWorkflowRuns()
+  return useMemo(() => executions.find((e) => e.isLive), [executions])
 }
 
-// The run currently in flight, if any — at most one is live at a time. A Stop
-// button reads this to know whether there's a run to cancel and, if so, its id.
-export function useLiveRun(): WorkflowRun | undefined {
-  const { runs } = useWorkflowRuns()
-
-  return useMemo(() => runs.find(isRunLive), [runs])
-}
-
-// The Browserbase session id a finished run drove, read from its final output so
-// a panel can fetch the replay. Only the output carries it — the recording lags
-// the session close, so the live metadata never has it — so an in-flight or
-// failed run reports undefined.
-function sessionIdForRun(run: WorkflowRun): string | undefined {
-  return run.output?.browserbaseSessionId
-}
-
-// One run flattened for the console: its identity and status, whether it's still
-// live, and its steps with everything each one produced.
-export interface ConsoleRun {
-  id: string
-  status: WorkflowRun["status"]
-  createdAt: Date
-  isLive: boolean
-  steps: RunStep[]
-  // The Browserbase session id to replay, present only once the run has finished.
-  browserbaseSessionId?: string
-}
-
-// Every run, newest first, with its steps resolved — the full history a console
-// panel below the canvas renders as a list of runs to drill into.
 export function useConsoleRuns(): ConsoleRun[] {
-  const { runs } = useWorkflowRuns()
-
-  return useMemo<ConsoleRun[]>(
-    () =>
-      [...runs]
-        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-        .map((run) => ({
-          id: run.id,
-          status: run.status,
-          createdAt: run.createdAt,
-          isLive: isRunLive(run),
-          steps: stepsForRun(run),
-          browserbaseSessionId: sessionIdForRun(run),
-        })),
-    [runs]
-  )
+  const { executions } = useWorkflowRuns()
+  return executions
 }

@@ -7,6 +7,10 @@ declare global {
         avatar?: string
       }
     }
+    RoomEvent: {
+      type: "EXECUTION_UPDATED"
+      executionId: string
+    }
   }
 }
 

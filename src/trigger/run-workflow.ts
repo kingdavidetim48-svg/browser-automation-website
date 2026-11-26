@@ -2,6 +2,8 @@ import toposort from "toposort"
 import { logger, metadata, task } from "@trigger.dev/sdk"
 import type { DeserializedJson } from "@trigger.dev/core"
 import { Stagehand } from "@browserbasehq/stagehand"
+import { randomUUID } from "node:crypto"
+
 import { nodeExecutors } from "@/features/workflows/nodes/node-executors"
 import {
   interpolate,
@@ -10,32 +12,46 @@ import {
 import { getWorkflow } from "@/features/workflows/data"
 import type { NodeType } from "@/features/workflows/nodes/node-registry"
 import { validateGraph } from "@/features/workflows/lib/validate-graph"
-import type { WorkflowGraph } from "@/lib/db/schema"
+import type {
+  NodeExecutionStatus,
+  WorkflowGraph,
+} from "@/lib/db/schema"
+import {
+  appendExecutionLog,
+  createWorkflowExecution,
+  getWorkflowExecution,
+  markRemainingNodesSkipped,
+  updateNodeRunState,
+  updateWorkflowExecutionStatus,
+} from "@/features/workflows/execution-data"
+import { broadcastExecutionUpdate } from "@/features/workflows/lib/broadcast-execution"
+import { redactSensitiveData, redactString } from "@/features/workflows/lib/redact"
 
-// One entry per node the run will walk, published to the run's metadata under
-// "steps" so the canvas — and the run console below it — can watch each node
-// move through its lifecycle live and inspect what it produced.
 export type RunStep = {
   nodeId: string
-  // The node's registry type (for its icon/accent) and title, denormalized so
-  // the console can render a step without re-reading the graph.
   type: NodeType
   title: string
-  status: "pending" | "running" | "done" | "failed"
-  // Wall-clock time the executor took, set once the step leaves "running".
+  status: NodeExecutionStatus
   durationMs?: number
-  // Whatever the executor returned, kept for the console's per-step detail view.
+  startedAt?: string
+  completedAt?: string
+  input?: Record<string, unknown>
   output?: unknown
-  // The thrown error's message, set only when status is "failed".
   error?: string
 }
 
 export type RunWorkflowPayload = {
+  executionId?: string
   workflowId: string
-  organizationId: string
+  organizationId?: string
+  orgId?: string
 }
 
-function parseRunWorkflowPayload(input: unknown): RunWorkflowPayload {
+function parseRunWorkflowPayload(input: unknown): {
+  executionId?: string
+  workflowId: string
+  organizationId: string
+} {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new Error(
       'Invalid run-workflow payload. Expected { "workflowId": "...", "organizationId": "..." }. Start the run from the KingsFlow dashboard.'
@@ -43,14 +59,18 @@ function parseRunWorkflowPayload(input: unknown): RunWorkflowPayload {
   }
 
   const payload = input as Record<string, unknown>
+  const orgValue =
+    typeof payload.organizationId === "string" && payload.organizationId.trim()
+      ? payload.organizationId.trim()
+      : typeof payload.orgId === "string" && payload.orgId.trim()
+        ? payload.orgId.trim()
+        : ""
+
   const missing: string[] = []
   if (typeof payload.workflowId !== "string" || !payload.workflowId.trim()) {
     missing.push('"workflowId" (the selected workflow ID)')
   }
-  if (
-    typeof payload.organizationId !== "string" ||
-    !payload.organizationId.trim()
-  ) {
+  if (!orgValue) {
     missing.push('"organizationId" (the authenticated Clerk organization ID)')
   }
   if (missing.length) {
@@ -60,18 +80,21 @@ function parseRunWorkflowPayload(input: unknown): RunWorkflowPayload {
   }
 
   return {
+    executionId:
+      typeof payload.executionId === "string" && payload.executionId.trim()
+        ? payload.executionId.trim()
+        : undefined,
     workflowId: (payload.workflowId as string).trim(),
-    organizationId: (payload.organizationId as string).trim(),
+    organizationId: orgValue,
   }
 }
 
-// The Trigger.dev task loads and validates the saved graph, computes a
-// topological execution order, and runs each action through its registered
-// executor while publishing progress and collected outputs.
 export const runWorkflowTask = task({
   id: "run-workflow",
   run: async (input: RunWorkflowPayload) => {
-    const { workflowId, organizationId } = parseRunWorkflowPayload(input)
+    const { executionId: providedExecutionId, workflowId, organizationId } =
+      parseRunWorkflowPayload(input)
+
     const workflow = await getWorkflow(organizationId, workflowId)
     if (!workflow) {
       throw new Error(
@@ -79,17 +102,33 @@ export const runWorkflowTask = task({
       )
     }
 
-    // The queued task reads the canonical graph after the authenticated action
-    // has persisted the latest edits for this workflow ID.
     const graph: WorkflowGraph | null = workflow.graph
     if (!graph) throw new Error(`Workflow ${workflowId} has no saved graph`)
     const { nodes, edges } = graph
-    const graphProblems = validateGraph(graph)
-    if (graphProblems.length) throw new Error(graphProblems.join(" "))
-    const byId = new Map(nodes.map((n) => [n.id, n]))
+    const graphProblems = validateGraph(graph, { runnable: true })
+    if (graphProblems.length) {
+      const message = graphProblems.join(" ")
+      if (providedExecutionId) {
+        await updateWorkflowExecutionStatus({
+          executionId: providedExecutionId,
+          orgId: organizationId,
+          status: "FAILED",
+          error: message,
+          completedAt: new Date(),
+        })
+        await markRemainingNodesSkipped(providedExecutionId)
+        await appendExecutionLog({
+          executionId: providedExecutionId,
+          level: "error",
+          eventType: "execution.failed",
+          message: `Validation failed: ${message}`,
+        })
+        await broadcastExecutionUpdate(workflowId, providedExecutionId)
+      }
+      throw new Error(message)
+    }
 
-    // Run only connected nodes — anything touching an edge. Orphans dropped on
-    // the canvas are skipped. toposort orders them and throws on a cycle.
+    const byId = new Map(nodes.map((n) => [n.id, n]))
     const connected = new Set(edges.flatMap((e) => [e.source, e.target]))
     const order = toposort
       .array(
@@ -98,39 +137,97 @@ export const runWorkflowTask = task({
       )
       .filter((id) => connected.has(id))
 
-    logger.log(`Running workflow ${workflow.name}`, { steps: order.length })
+    const disconnectedIds = nodes
+      .map((n) => n.id)
+      .filter((id) => !connected.has(id))
 
-    // Seed every step as "pending" up front and publish, so the canvas can render
-    // the full run as a list of spinners before any node starts. type and title
-    // are denormalized from the graph so the console can label each step without
-    // it. We mutate these entries in place and re-publish on every status change.
-    const steps: RunStep[] = order.map((nodeId) => {
-      const node = byId.get(nodeId)!
-      return {
-        nodeId,
-        type: node.data.type,
-        title: node.data.title,
-        status: "pending",
-      }
+    const executionId = providedExecutionId ?? randomUUID()
+    if (!providedExecutionId) {
+      await createWorkflowExecution({
+        executionId,
+        workflowId,
+        orgId: organizationId,
+        triggerInfo: { type: "api" },
+        nodes: [
+          ...order.map((nodeId) => {
+            const node = byId.get(nodeId)!
+            return {
+              nodeId,
+              nodeType: node.data.type,
+              nodeTitle: node.data.title,
+              status: "queued" as const,
+            }
+          }),
+          ...disconnectedIds.map((nodeId) => {
+            const node = byId.get(nodeId)!
+            return {
+              nodeId,
+              nodeType: node.data.type,
+              nodeTitle: node.data.title,
+              status: "skipped" as const,
+            }
+          }),
+        ],
+      })
+    }
+
+    // Check if execution was already cancelled while queued
+    const initialExec = await getWorkflowExecution(organizationId, executionId)
+    if (initialExec?.status === "CANCELLED") {
+      await markRemainingNodesSkipped(executionId)
+      await broadcastExecutionUpdate(workflowId, executionId)
+      return { executionId, steps: [], browserbaseSessionId: undefined }
+    }
+
+    const executionStartedAt = new Date()
+    await updateWorkflowExecutionStatus({
+      executionId,
+      orgId: organizationId,
+      status: "RUNNING",
+      startedAt: executionStartedAt,
+    })
+    await appendExecutionLog({
+      executionId,
+      level: "info",
+      eventType: "execution.started",
+      message: `Started workflow "${workflow.name}" (${order.length} steps)`,
+      metadata: { totalSteps: order.length },
     })
 
-    // steps carries an arbitrary `output`, which is wider than trigger's
-    // DeserializedJson metadata type; the values are JSON at runtime, so cast at
-    // this one boundary rather than constraining the shape the console reads.
+    logger.log(`Running workflow ${workflow.name}`, {
+      executionId,
+      steps: order.length,
+    })
+
+    const steps: RunStep[] = [
+      ...order.map((nodeId) => {
+        const node = byId.get(nodeId)!
+        return {
+          nodeId,
+          type: node.data.type,
+          title: node.data.title,
+          status: "queued" as const,
+        }
+      }),
+      ...disconnectedIds.map((nodeId) => {
+        const node = byId.get(nodeId)!
+        return {
+          nodeId,
+          type: node.data.type,
+          title: node.data.title,
+          status: "skipped" as const,
+        }
+      }),
+    ]
+
     const publishSteps = () =>
       metadata.set("steps", steps as unknown as DeserializedJson[])
 
     publishSteps()
+    await metadata.flush()
+    await broadcastExecutionUpdate(workflowId, executionId)
 
-    // The run owns one Browserbase session, opened lazily on the first browser step
-    // and reused by every later one, so the recording spans the whole flow. The
-    // Stagehand-hosted auto mode keeps browser primitive calls on the configured
-    // Browserbase account. The autonomous Agent uses its explicitly selected
-    // model and requires that provider's API credential.
     let stagehand: Stagehand | undefined
-    // The Browserbase session id, captured the moment the session opens so it can
-    // be returned in the run's output — a panel reads it there to fetch the replay
-    // once the run finishes and the recording is available.
     let browserbaseSessionId: string | undefined
     const getStagehand = async () => {
       if (stagehand) return stagehand
@@ -149,65 +246,193 @@ export const runWorkflowTask = task({
       return stagehand
     }
 
-    // Each node's result, keyed by its id, so later nodes can pull from it.
-    // Because we walk in dependency order, every id a node references is already
-    // populated by the time we run it.
     const outputs: NodeOutputs = {}
+    let completedCount = 0
+    let failedCount = 0
 
     try {
       for (let i = 0; i < order.length; i++) {
+        const currentExec = await getWorkflowExecution(organizationId, executionId)
+        if (currentExec?.status === "CANCELLED") {
+          for (let j = i; j < order.length; j++) {
+            steps[j].status = "skipped"
+          }
+          await markRemainingNodesSkipped(executionId)
+          publishSteps()
+          await metadata.flush()
+          await broadcastExecutionUpdate(workflowId, executionId)
+          return { executionId, steps, browserbaseSessionId }
+        }
+
         const id = order[i]
         const step = steps[i]
         const node = byId.get(id)!
         logger.log(`Running step: ${node.data.title}`)
 
-        // A node with no executor (the start trigger) does no work and produces no
-        // output — mark it done rather than leaving it "pending", which reads as
-        // skipped forever in the console.
         const executor = nodeExecutors[node.data.type]
         if (!executor) {
-          step.status = "done"
+          const now = new Date()
+          step.status = "completed"
+          step.startedAt = now.toISOString()
+          step.completedAt = now.toISOString()
+          step.durationMs = 0
+          completedCount += 1
+
+          await updateNodeRunState({
+            executionId,
+            nodeId: id,
+            status: "completed",
+            startedAt: now,
+            completedAt: now,
+            durationMs: 0,
+          })
+          await updateWorkflowExecutionStatus({
+            executionId,
+            orgId: organizationId,
+            completedNodes: completedCount,
+          })
+          await appendExecutionLog({
+            executionId,
+            nodeId: id,
+            nodeTitle: node.data.title,
+            level: "info",
+            eventType: "node.completed",
+            message: `Trigger "${node.data.title}" completed`,
+          })
           publishSteps()
+          await broadcastExecutionUpdate(workflowId, executionId)
           continue
         }
 
-        // Mark running before the executor and flush immediately: the "done" set
-        // below happens before the SDK's next background flush, so without forcing
-        // it here the "running" state is overwritten and the canvas never spins.
-        step.status = "running"
-        publishSteps()
-        await metadata.flush()
-
-        // Swap {{ nodeId.path }} placeholders for upstream output before running.
         const values = Object.fromEntries(
           Object.entries(node.data.values).map(([key, text]) => [
             key,
             interpolate({ text, outputs }),
           ])
         )
+        const safeInput = redactSensitiveData(values)
+        const stepStartedAt = new Date()
+        const startedMs = Date.now()
 
-        // Time the executor so the console can show how long the step took, on
-        // both the success and failure paths.
-        const startedAt = Date.now()
+        step.status = "running"
+        step.startedAt = stepStartedAt.toISOString()
+        step.input = safeInput
+
+        await updateNodeRunState({
+          executionId,
+          nodeId: id,
+          status: "running",
+          input: safeInput,
+          startedAt: stepStartedAt,
+        })
+        await appendExecutionLog({
+          executionId,
+          nodeId: id,
+          nodeTitle: node.data.title,
+          level: "info",
+          eventType: "node.started",
+          message: `Running "${node.data.title}"`,
+        })
+
+        publishSteps()
+        await metadata.flush()
+        await broadcastExecutionUpdate(workflowId, executionId)
+
         try {
           const output = await executor({ values, getStagehand })
           outputs[id] = output
-          step.output = output
+
+          const safeOutput = redactSensitiveData(output)
+          const stepCompletedAt = new Date()
+          const durationMs = Date.now() - startedMs
+
+          step.status = "completed"
+          step.completedAt = stepCompletedAt.toISOString()
+          step.durationMs = durationMs
+          step.output = safeOutput
+          completedCount += 1
+
+          await updateNodeRunState({
+            executionId,
+            nodeId: id,
+            status: "completed",
+            output: safeOutput,
+            completedAt: stepCompletedAt,
+            durationMs,
+          })
+          await updateWorkflowExecutionStatus({
+            executionId,
+            orgId: organizationId,
+            completedNodes: completedCount,
+          })
+          await appendExecutionLog({
+            executionId,
+            nodeId: id,
+            nodeTitle: node.data.title,
+            level: "info",
+            eventType: "node.completed",
+            message: `Completed "${node.data.title}" in ${durationMs}ms`,
+            metadata: { durationMs },
+          })
+
+          publishSteps()
+          await broadcastExecutionUpdate(workflowId, executionId)
         } catch (error) {
-          // Flush the "failed" state before the throw unwinds the run: a thrown run
-          // returns no output, so this flushed metadata is the only way the canvas
-          // ever learns which node failed — and the only place its error survives.
+          const stepCompletedAt = new Date()
+          const durationMs = Date.now() - startedMs
+          const rawMessage =
+            error instanceof Error ? error.message : String(error)
+          const safeError = redactString(rawMessage)
+
           step.status = "failed"
-          step.durationMs = Date.now() - startedAt
-          step.error = error instanceof Error ? error.message : String(error)
+          step.completedAt = stepCompletedAt.toISOString()
+          step.durationMs = durationMs
+          step.error = safeError
+          failedCount += 1
+
+          for (let j = i + 1; j < order.length; j++) {
+            steps[j].status = "skipped"
+          }
+
+          await updateNodeRunState({
+            executionId,
+            nodeId: id,
+            status: "failed",
+            error: safeError,
+            completedAt: stepCompletedAt,
+            durationMs,
+          })
+          await markRemainingNodesSkipped(executionId)
+          await updateWorkflowExecutionStatus({
+            executionId,
+            orgId: organizationId,
+            status: "FAILED",
+            failedNodes: failedCount,
+            completedNodes: completedCount,
+            error: safeError,
+            completedAt: stepCompletedAt,
+          })
+          await appendExecutionLog({
+            executionId,
+            nodeId: id,
+            nodeTitle: node.data.title,
+            level: "error",
+            eventType: "node.failed",
+            message: `Node "${node.data.title}" failed: ${safeError}`,
+            metadata: { durationMs },
+          })
+          await appendExecutionLog({
+            executionId,
+            level: "error",
+            eventType: "execution.failed",
+            message: `Workflow execution failed at "${node.data.title}"`,
+          })
+
           publishSteps()
           await metadata.flush()
+          await broadcastExecutionUpdate(workflowId, executionId)
           throw error
         }
-
-        step.status = "done"
-        step.durationMs = Date.now() - startedAt
-        publishSteps()
       }
     } finally {
       try {
@@ -217,6 +442,28 @@ export const runWorkflowTask = task({
       }
     }
 
-    return { steps, browserbaseSessionId }
+    const completedAt = new Date()
+    await updateWorkflowExecutionStatus({
+      executionId,
+      orgId: organizationId,
+      status: "COMPLETED",
+      completedNodes: completedCount,
+      failedNodes: failedCount,
+      browserbaseSessionId,
+      completedAt,
+    })
+    await appendExecutionLog({
+      executionId,
+      level: "info",
+      eventType: "execution.completed",
+      message: `Workflow completed (${completedCount}/${order.length} steps)`,
+      metadata: {
+        completedNodes: completedCount,
+        durationMs: completedAt.getTime() - executionStartedAt.getTime(),
+      },
+    })
+    await broadcastExecutionUpdate(workflowId, executionId)
+
+    return { executionId, steps, browserbaseSessionId }
   },
 })

@@ -30,7 +30,11 @@ import {
   runWorkflowAction,
 } from "@/features/workflows/actions"
 import { NodeIcon } from "@/features/workflows/components/node-icon"
-import { useLiveRun } from "@/features/workflows/components/workflow-runs-provider"
+import {
+  useLiveRun,
+  useWorkflowExecutionState,
+} from "@/features/workflows/components/workflow-runs-provider"
+import { Spinner } from "@/components/ui/spinner"
 import { useProPlan } from "@/features/workflows/hooks/use-pro-plan"
 import { useUpstreamConnections } from "@/features/workflows/hooks/use-upstream-connections"
 import { validateGraph } from "@/features/workflows/lib/validate-graph"
@@ -295,7 +299,7 @@ function Palette() {
   }
 
   return (
-    <Section title="Toolbar" description="Click any step to add to canvas">
+    <Section title="Toolbar" description="Click or drag any step onto canvas">
       <Accordion
         type="multiple"
         defaultValue={sections.map((s) => s.kind)}
@@ -320,11 +324,19 @@ function Palette() {
                     <button
                       key={def.type}
                       type="button"
+                      draggable={!locked}
+                      onDragStart={(e) => {
+                        if (locked) return
+                        e.dataTransfer.setData("application/reactflow", type)
+                        e.dataTransfer.effectAllowed = "move"
+                      }}
                       onClick={() => add(type)}
                       title={locked ? "Upgrade to Pro to add this node" : undefined}
                       className={cn(
                         "group flex w-full items-start gap-2.5 rounded-lg border border-transparent p-2 text-left transition-all hover:border-border hover:bg-muted/50 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring",
-                        locked && "opacity-75"
+                        locked
+                          ? "opacity-75 cursor-not-allowed"
+                          : "cursor-grab active:cursor-grabbing"
                       )}
                     >
                       <NodeIcon type={type} className="mt-0.5" />
@@ -399,6 +411,7 @@ function RunButton({ workflowId }: { workflowId: string }) {
   // The run in flight, if any. At most one is live at a time, so its presence
   // decides which mode the button is in.
   const liveRun = useLiveRun()
+  const { refresh } = useWorkflowExecutionState()
 
   if (liveRun) {
     return (
@@ -410,15 +423,27 @@ function RunButton({ workflowId }: { workflowId: string }) {
         onClick={() => {
           startTransition(async () => {
             try {
-              await cancelWorkflowRunAction({ workflowId, runId: liveRun.id })
-            } catch {
-              toast.error("Couldn't stop the run.")
+              await cancelWorkflowRunAction({
+                workflowId,
+                executionId: liveRun.id,
+                runId: liveRun.triggerRunId ?? undefined,
+              })
+              await refresh()
+              toast.info("Workflow execution cancelled.")
+            } catch (err) {
+              toast.error(
+                err instanceof Error ? err.message : "Couldn't stop the run."
+              )
             }
           })
         }}
       >
-        <Square className="size-3 fill-current" />
-        Stop
+        {isPending ? (
+          <Spinner className="size-3" />
+        ) : (
+          <Square className="size-3 fill-current" />
+        )}
+        {isPending ? "Stopping..." : "Stop"}
       </Button>
     )
   }
@@ -431,19 +456,32 @@ function RunButton({ workflowId }: { workflowId: string }) {
       className="h-8 gap-1.5 text-xs font-medium px-3 shadow-xs bg-primary text-primary-foreground hover:bg-primary/90"
       onClick={() => {
         const graph = { nodes: getNodes(), edges: getEdges() }
-        const problems = validateGraph(graph)
+        const problems = validateGraph(graph, { runnable: true })
         if (problems.length > 0) {
           toast.error(problems[0])
           return
         }
 
         startTransition(async () => {
-          await runWorkflowAction({ workflowId, graph })
+          try {
+            await runWorkflowAction({ workflowId, graph })
+            await refresh()
+          } catch (err) {
+            toast.error(
+              err instanceof Error
+                ? err.message
+                : "Failed to start workflow execution."
+            )
+          }
         })
       }}
     >
-      <Play className="size-3 fill-current" />
-      Run
+      {isPending ? (
+        <Spinner className="size-3" />
+      ) : (
+        <Play className="size-3 fill-current" />
+      )}
+      {isPending ? "Starting..." : "Run"}
     </Button>
   )
 }

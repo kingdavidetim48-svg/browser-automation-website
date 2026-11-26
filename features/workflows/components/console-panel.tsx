@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useStore } from "@xyflow/react"
 import { Terminal } from "lucide-react"
 
 import {
@@ -9,29 +10,51 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable"
 
+import { ExecutionStatusBar } from "@/features/workflows/components/execution-status-bar"
 import { InspectorPanel } from "@/features/workflows/components/inspector-panel"
 import {
   LogsPanel,
   type ConsoleSelection,
 } from "@/features/workflows/components/logs-panel"
+import { useWorkflowExecutionState } from "@/features/workflows/components/workflow-runs-provider"
 
-// True when two selections point at the same thing — same kind, same run, and
-// for a step the same node. Clicking the active selection again clears it.
 function isSameSelection(a: ConsoleSelection, b: ConsoleSelection) {
   if (a.kind !== b.kind) return false
   if (a.runId !== b.runId) return false
   return a.kind === "step" && b.kind === "step" ? a.nodeId === b.nodeId : true
 }
 
-// The run console below the canvas. It owns what's selected: the logs on the
-// left drive the selection, and the InspectorPanel on the right shows either the
-// selected step's output or the selected run's replay. Clicking the active
-// selection again clears it.
 export function ConsolePanel() {
-  const [selected, setSelected] = useState<ConsoleSelection | null>(null)
+  const [manualSelection, setManualSelection] =
+    useState<ConsoleSelection | null>(null)
+  const [prevCanvasNodeId, setPrevCanvasNodeId] = useState<string | undefined>(
+    undefined
+  )
+
+  const selectedCanvasNodeId = useStore(
+    (s) => s.nodes.find((n) => n.selected)?.id
+  )
+  const { latestExecution } = useWorkflowExecutionState()
+
+  // Clear manual override whenever the user selects a different node on canvas
+  if (selectedCanvasNodeId !== prevCanvasNodeId) {
+    setPrevCanvasNodeId(selectedCanvasNodeId)
+    if (selectedCanvasNodeId && latestExecution) {
+      const hasStep = latestExecution.steps.some(
+        (s) => s.nodeId === selectedCanvasNodeId
+      )
+      if (hasStep) {
+        setManualSelection({
+          kind: "step",
+          runId: latestExecution.id,
+          nodeId: selectedCanvasNodeId,
+        })
+      }
+    }
+  }
 
   const toggle = (selection: ConsoleSelection) => {
-    setSelected((prev) =>
+    setManualSelection((prev) =>
       prev && isSameSelection(prev, selection) ? null : selection
     )
   }
@@ -41,20 +64,28 @@ export function ConsolePanel() {
       <div className="flex shrink-0 items-center justify-between border-b border-border/80 bg-card/90 px-3.5 py-1.5">
         <div className="flex items-center gap-2">
           <Terminal className="size-3.5 text-muted-foreground" />
-          <span className="text-xs font-semibold tracking-wide text-foreground">Console</span>
+          <span className="text-xs font-semibold tracking-wide text-foreground">
+            Console
+          </span>
         </div>
-        <span className="text-[10px] text-muted-foreground">Execution & Replays</span>
+        <span className="text-[10px] text-muted-foreground">
+          Execution, Logs &amp; Inspector
+        </span>
       </div>
+      <ExecutionStatusBar />
       <div className="min-h-0 flex-1">
         <ResizablePanelGroup orientation="horizontal" className="size-full">
-          <ResizablePanel defaultSize={selected ? "55%" : "100%"} minSize="200px">
-            <LogsPanel selected={selected} onSelect={toggle} />
+          <ResizablePanel
+            defaultSize={manualSelection ? "55%" : "100%"}
+            minSize="200px"
+          >
+            <LogsPanel selected={manualSelection} onSelect={toggle} />
           </ResizablePanel>
-          {selected && (
+          {manualSelection && (
             <>
               <ResizableHandle withHandle />
               <ResizablePanel defaultSize="45%" minSize="240px">
-                <InspectorPanel selection={selected} />
+                <InspectorPanel selection={manualSelection} />
               </ResizablePanel>
             </>
           )}
